@@ -5,6 +5,8 @@ round-after-round, auto-fix the validated **non-security** ones (validation-gate
 and write an Opus remediation **PLAN** for anything critical or security. Language-agnostic. Zero-config
 (it auto-detects the repo's language, test command, and a safe protected-paths list on first run).
 
+> **New here?** The **[Cheat-Sheet](docs/CHEATSHEET.md)** shows every command, flag, and how to call it — visually, on one page.
+
 ## `/goal` — the one-stop build↔review loop
 
 `/goal` takes an idea (small update or large build) all the way through:
