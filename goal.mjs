@@ -17,8 +17,9 @@
 // material remains — not a proof of correctness.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { runSummary, classifyCommit, aggregate } from "./lib/metrics.mjs";
 import {
   autodetectConfig, isProtected, routeFinding, gateVerdict, isControlPlane,
   buildManifest, parseAutonomy, TerminationGuard, fingerprintFindings, netValidated,
@@ -223,8 +224,39 @@ function writeManifest(cfg, models, gateResults, iteration) {
   return manifest;
 }
 
+// ---- self-evaluation: read past run-manifests + git history into a trend ---
+// `--metrics` realizes the self-evaluating loop: slop-rate from gate history and a
+// bug-escape proxy from revert/hotfix commits. The numbers gate whether a self-rewrite
+// is kept (see lib/metrics.selfChangeAcceptable).
+function reportMetrics() {
+  const summaries = [];
+  if (existsSync("reviews")) {
+    for (const d of readdirSync("reviews").filter((x) => x.startsWith("goal-"))) {
+      for (const f of (() => { try { return readdirSync(join("reviews", d)); } catch { return []; } })()) {
+        if (/^manifest-\d+\.json$/.test(f)) {
+          try { summaries.push(runSummary(JSON.parse(readFileSync(join("reviews", d, f), "utf8")))); } catch { /* skip */ }
+        }
+      }
+    }
+  }
+  const subjects = (spawnSync("git", ["log", "--pretty=%s", "-n", "500"], { shell: true, encoding: "utf8" }).stdout || "")
+    .split(/\r?\n/).filter(Boolean);
+  const report = aggregate(summaries, subjects.map(classifyCommit));
+  const md = `# /goal metrics\n\n` +
+    `- runs analyzed: **${report.runs}** (clean: ${report.cleanRuns})\n` +
+    `- slop-rate (slop-gate failures / run): **${report.slopRate}**\n` +
+    `- commits scanned: **${report.commits}**\n` +
+    `- escape signals (reverts + hotfixes): **${report.escapeSignals}**\n` +
+    `- bug-escape-rate (proxy): **${report.escapeRateProxy}**\n\n` +
+    `_A self-rewrite is kept only if neither slop-rate nor escape-rate worsens and one improves._\n`;
+  writeFileSync("METRICS.md", md);
+  log(md.replace(/\*\*/g, ""));
+  log(`${C.dim}wrote METRICS.md${C.x}`);
+}
+
 // ---- main loop -------------------------------------------------------------
 function main() {
+  if (flag("--metrics")) { reportMetrics(); return; }
   mkdirSync(RUN_DIR, { recursive: true });
   const cfg = loadConfig();
   const models = detectModels();
