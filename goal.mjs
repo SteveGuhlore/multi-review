@@ -23,7 +23,7 @@ import { runSummary, classifyCommit, aggregate } from "./lib/metrics.mjs";
 import {
   autodetectConfig, isProtected, routeFinding, gateVerdict, isControlPlane,
   buildManifest, parseAutonomy, TerminationGuard, fingerprintFindings, netValidated,
-  findSecrets, manifestSha, pickLatestRoundFile,
+  findSecrets, manifestSha, pickLatestRoundFile, verifyChain,
 } from "./lib/core.mjs";
 
 // ---- args ------------------------------------------------------------------
@@ -284,6 +284,7 @@ Options:
   --gates-only             deterministic spine only (gate ladder + manifest); no model calls — ideal for CI
   --dry-run                describe model phases; run the real deterministic spine
   --metrics                report bug-escape + slop-rate trend (writes METRICS.md) and exit
+  --verify                 verify the manifest hash-chain of the latest run (or --target <run-dir>)
   --target <path>          scope (default: .)
   --rounds N               outer iteration cap (default: 6)
   --minutes N              wall-clock cap (default: 180)
@@ -292,9 +293,26 @@ Options:
 Safety: never --apply on main/master; never auto-merges; security perimeter is fail-closed;
 control-plane gates never run autonomously. Artifacts: reviews/goal-<ts>/.`;
 
+// Verify the manifest hash-chain of a goal run (latest, or --target <reviews/goal-...>).
+function verifyRun() {
+  let dir = opt("--target", "");
+  if (!dir || !existsSync(join(dir, "manifest-1.json"))) {
+    const runs = existsSync("reviews") ? readdirSync("reviews").filter((d) => d.startsWith("goal-")).sort() : [];
+    dir = runs.length ? join("reviews", runs[runs.length - 1]) : "";
+  }
+  if (!dir || !existsSync(dir)) { console.log("verify: no goal run found."); process.exitCode = 2; return; }
+  const files = readdirSync(dir).filter((f) => /^manifest-\d+\.json$/.test(f))
+    .sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]));
+  const manifests = files.map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
+  const res = verifyChain(manifests);
+  if (res.ok) console.log(`${C.g}✓${C.x} provenance chain intact — ${manifests.length} manifest(s) in ${dir}`);
+  else { console.log(`${C.r}✗${C.x} provenance chain BROKEN at manifest index ${res.brokenAt} in ${dir}`); process.exitCode = 1; }
+}
+
 // ---- main loop -------------------------------------------------------------
 function main() {
   if (flag("--help") || flag("-h")) { console.log(HELP); return; }
+  if (flag("--verify")) { verifyRun(); return; }
   if (flag("--metrics")) { reportMetrics(); return; }
   mkdirSync(RUN_DIR, { recursive: true });
   const cfg = loadConfig();
