@@ -7,5 +7,5 @@ Copy-Item (Join-Path $src "commands\multi-review.md") (Join-Path $claude "comman
 Copy-Item (Join-Path $src "loop.mjs") (Join-Path $claude "multi-review\loop.mjs") -Force
 Copy-Item (Join-Path $src "bin\codex-review.ps1") (Join-Path $claude "multi-review\codex-review.ps1") -Force
 Copy-Item (Join-Path $src "bin\gemini-review.ps1") (Join-Path $claude "multi-review\gemini-review.ps1") -Force
-Write-Host "✓ multi-review installed → $claude"
-Write-Host "  command: /multi-review   ·   loop: node ~/.claude/multi-review/loop.mjs --target . --apply"
+Write-Host "multi-review installed -> $claude"
+Write-Host "  command: /multi-review   |   loop: node ~/.claude/multi-review/loop.mjs --target . --apply"
