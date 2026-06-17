@@ -3,10 +3,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildManifest, manifestSha } from "../lib/core.mjs";
 
 const GOAL = join(dirname(fileURLToPath(import.meta.url)), "..", "goal.mjs");
 
@@ -65,4 +66,51 @@ test("goal --gates-only: a required gate whose tool is absent fails closed (not 
   );
   assert.match(stdout, /gates blocked/);
   assert.match(stdout, /not installed/);
+});
+
+function withFixture(setup, fn) {
+  const dir = mkdtempSync(join(tmpdir(), "goal-it-"));
+  try { setup(dir); return fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+test("goal --metrics reads run-manifests and writes METRICS.md", () => {
+  withFixture(
+    (dir) => {
+      const runDir = join(dir, "reviews", "goal-x");
+      mkdirSync(runDir, { recursive: true });
+      const m = buildManifest({ model: "opus", iteration: 1, ts: "t1", gates: [{ name: "dead-code", pass: false }] });
+      writeFileSync(join(runDir, "manifest-1.json"), JSON.stringify(m));
+    },
+    (dir) => {
+      const r = spawnSync("node", [GOAL, "--metrics"], { cwd: dir, encoding: "utf8", timeout: 60_000 });
+      assert.match(r.stdout, /runs analyzed: 1/);
+      assert.match(r.stdout, /slop-rate.*1/);
+      assert.ok(existsSync(join(dir, "METRICS.md")));
+    },
+  );
+});
+
+test("goal --verify reports intact, then BROKEN after tampering (exit 1)", () => {
+  withFixture(
+    (dir) => {
+      const runDir = join(dir, "reviews", "goal-y");
+      mkdirSync(runDir, { recursive: true });
+      const m1 = buildManifest({ model: "opus", iteration: 1, ts: "t1" });
+      const m2 = buildManifest({ model: "opus", iteration: 2, ts: "t2", prev: manifestSha(m1) });
+      writeFileSync(join(runDir, "manifest-1.json"), JSON.stringify(m1, null, 2));
+      writeFileSync(join(runDir, "manifest-2.json"), JSON.stringify(m2, null, 2));
+    },
+    (dir) => {
+      const target = join(dir, "reviews", "goal-y");
+      const ok = spawnSync("node", [GOAL, "--verify", "--target", target], { cwd: dir, encoding: "utf8" });
+      assert.match(ok.stdout, /chain intact/);
+      // Tamper with manifest-1 → chain must break and exit non-zero.
+      const f = join(target, "manifest-1.json");
+      const m = JSON.parse(readFileSync(f)); m.gitSha = "HACKED";
+      writeFileSync(f, JSON.stringify(m, null, 2));
+      const bad = spawnSync("node", [GOAL, "--verify", "--target", target], { cwd: dir, encoding: "utf8" });
+      assert.match(bad.stdout, /BROKEN/);
+      assert.equal(bad.status, 1);
+    },
+  );
 });
