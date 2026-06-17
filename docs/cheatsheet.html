@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>multi-review — cheat sheet</title>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#121826; --panel2:#0e1421; --line:#243044;
+    --ink:#e6edf3; --mut:#93a1b5; --dim:#6b7a90;
+    --audit:#2dd4bf; --build:#f59e0b; --safe:#3fb950; --link:#58a6ff;
+    --crit:#f85149; --high:#ff8a4c; --med:#d29922; --low:#3fb950; --info:#58a6ff;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body{
+    margin:0;background:radial-gradient(1200px 600px at 70% -10%,#16203a 0%,var(--bg) 55%);
+    color:var(--ink);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    padding:32px 20px 56px;
+  }
+  .wrap{max-width:1120px;margin:0 auto}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  /* header */
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-size:30px;margin:0;letter-spacing:-.5px}
+  .tag{font-size:12px;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+  .sub{color:var(--mut);margin:6px 0 26px;max-width:760px}
+  .sub b{color:var(--ink)}
+  /* layout */
+  .grid{display:grid;gap:16px}
+  .two{grid-template-columns:1fr 1fr}
+  @media(max-width:820px){.two{grid-template-columns:1fr}}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:var(--radius);padding:18px 18px 16px}
+  .card h2{margin:0 0 2px;font-size:18px;display:flex;align-items:center;gap:9px}
+  .card .role{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin-bottom:12px}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+  .audit h2{color:var(--audit)} .build h2{color:var(--build)}
+  .audit{box-shadow:inset 0 0 0 1px rgba(45,212,191,.10)} .build{box-shadow:inset 0 0 0 1px rgba(245,158,11,.10)}
+  .lead{color:var(--mut);font-size:14px;margin:0 0 12px}
+  /* command chips */
+  .cmd{display:block;background:#0a0e16;border:1px solid var(--line);border-radius:9px;padding:8px 11px;margin:6px 0;font-size:13px;color:#cfe3ff;white-space:pre-wrap;word-break:break-word}
+  .cmd .o{color:var(--build)} .cmd .a{color:var(--audit)} .cmd .c{color:var(--dim)}
+  .kv{font-size:13px;color:var(--mut)}
+  .kv b{color:var(--ink)}
+  .pill{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:2px 7px;margin:2px 3px 2px 0;color:var(--mut)}
+  .pill.def{border-color:var(--safe);color:var(--safe)}
+  .section-title{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin:26px 2px 10px}
+  /* pipeline */
+  .pipe{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+  .step{flex:1;min-width:120px;background:#0e1421;border:1px solid var(--line);border-radius:10px;padding:11px 12px;position:relative}
+  .step + .step{margin-left:18px}
+  .step + .step::before{content:"→";position:absolute;left:-15px;top:50%;transform:translateY(-50%);color:var(--build);font-weight:700}
+  .step b{display:block;font-size:13px;letter-spacing:.06em}
+  .step span{font-size:11.5px;color:var(--mut)}
+  .loopnote{font-size:12px;color:var(--dim);margin-top:8px;text-align:center}
+  /* agents */
+  .agents{display:grid;grid-template-columns:1fr 1.25fr;gap:16px}
+  @media(max-width:820px){.agents{grid-template-columns:1fr}}
+  .layer h3{margin:0 0 8px;font-size:14px}
+  .rev{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+  .model{font-size:12.5px;border:1px solid var(--line);border-radius:8px;padding:5px 10px;background:#0a0e16}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:600;letter-spacing:.04em}
+  .muted{color:var(--mut)}
+  /* legend / rails / artifacts */
+  .legend span{display:inline-flex;align-items:center;gap:6px;margin-right:14px;font-size:12.5px;color:var(--mut)}
+  ul.clean{list-style:none;padding:0;margin:0}
+  ul.clean li{padding:6px 0;border-bottom:1px dashed var(--line);font-size:13.5px}
+  ul.clean li:last-child{border-bottom:0}
+  ul.clean .t{color:var(--mut)} ul.clean code{color:var(--audit)}
+  .rail{display:flex;gap:9px;align-items:flex-start;font-size:13px;padding:5px 0}
+  .rail .ck{color:var(--safe);font-weight:700}
+  footer{margin-top:28px;color:var(--dim);font-size:12.5px;border-top:1px solid var(--line);padding-top:14px}
+  footer code{color:var(--mut)}
+  .hl{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>multi-review</h1>
+    <span class="tag">cheat sheet · dashboard</span>
+  </header>
+  <p class="sub">Three AI models (<b>Claude · Codex · Gemini</b>) review your code together, so one model never gets the last word. Language-agnostic, zero-config, safe by default. <b>Rule of thumb:</b> have code → <span style="color:var(--audit)">/multi-review</span>; want code → <span style="color:var(--build)">/goal</span>; add <code>--apply</code> only when it should actually edit.</p>
+
+  <!-- HERO: two doors -->
+  <div class="grid two">
+    <div class="card audit">
+      <h2><span class="dot" style="background:var(--audit)"></span>/multi-review</h2>
+      <div class="role">the auditor — check what exists</div>
+      <p class="lead">All available models read your code, debate, and agree on the <b>real</b> issues. Report by default; opt in to auto-fix the safe ones.</p>
+      <span class="cmd"><span class="a">/multi-review</span> full</span>
+      <span class="cmd"><span class="a">/multi-review</span> path server <span class="c">--apply</span></span>
+      <div class="kv" style="margin-top:8px"><b>for:</b> audits · PR review · security pass</div>
+    </div>
+    <div class="card build">
+      <h2><span class="dot" style="background:var(--build)"></span>/goal</h2>
+      <div class="role">the builder — make / change code</div>
+      <p class="lead">Plans it, builds it, gates it, then runs the auditor for you — looping until it converges or hits a cap.</p>
+      <span class="cmd"><span class="o">/goal</span> "add CSV export" <span class="c">--checkpoints</span></span>
+      <span class="cmd"><span class="o">/goal</span> "fix the date bug" <span class="c">--auto --apply</span></span>
+      <div class="kv" style="margin-top:8px"><b>for:</b> features · bug fixes · refactors</div>
+    </div>
+  </div>
+
+  <!-- PIPELINE -->
+  <div class="section-title">How /goal chains everything · <span class="muted">/multi-review is just the REVIEW box</span></div>
+  <div class="card">
+    <div class="pipe">
+      <div class="step"><b>PLAN</b><span>helpmecode → PLAN.md</span></div>
+      <div class="step"><b>BUILD</b><span>TDD, per task</span></div>
+      <div class="step"><b>GATES</b><span>test · lint · build</span></div>
+      <div class="step"><b>REVIEW</b><span>3 models debate</span></div>
+      <div class="step"><b>ROUTE</b><span>fix · plan · done</span></div>
+    </div>
+    <div class="loopnote">↺ re-plan / re-build until converged (or it hits a cap)</div>
+  </div>
+
+  <!-- AGENT TEAM -->
+  <div class="section-title">The agent team</div>
+  <div class="card">
+    <div class="agents">
+      <div class="layer">
+        <h3>1 · Reviewers <span class="muted">— every review (terminal &amp; slash)</span></h3>
+        <div class="rev">
+          <span class="model">Claude <span class="muted">opus</span></span>
+          <span class="model">Codex <span class="muted">gpt</span></span>
+          <span class="model">Gemini</span>
+        </div>
+        <p class="lead" style="margin:0">→ debate to consensus → validated findings.<br><span class="muted">These are the <code class="mono">claude / codex / gemini review</code> lines you see in a run.</span></p>
+      </div>
+      <div class="layer">
+        <h3>2 · Builders <span class="muted">— only in /goal</span></h3>
+        <table>
+          <tr><th>Phase</th><th>Who</th><th>Guardrail</th></tr>
+          <tr><td>PLAN</td><td>a Claude planner running <code>helpmecode</code></td><td class="muted">emits PLAN.md + .multi-review.json</td></tr>
+          <tr><td>BUILD</td><td>one fresh implementer <b>per task</b></td><td class="muted">can't edit tests (writer ≠ approver)</td></tr>
+          <tr><td>REVIEW</td><td>hands the diff to the reviewer team →</td><td class="muted">Claude is final arbiter</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- COMMAND REFERENCE -->
+  <div class="section-title">Command reference</div>
+  <div class="grid two">
+    <div class="card audit">
+      <h2 style="font-size:16px"><span class="dot" style="background:var(--audit)"></span>/multi-review &lt;scope&gt; [flags]</h2>
+      <div style="margin:10px 0 4px">
+        <span class="pill def">branch · default</span><span class="pill">branch &lt;name&gt;</span>
+        <span class="pill">full</span><span class="pill">path &lt;dir&gt;</span><span class="pill">staged</span>
+      </div>
+      <div style="margin:8px 0 4px">
+        <span class="pill">--debate</span><span class="pill">--apply <span class="muted">(implies --debate)</span></span><span class="pill">--transcript</span>
+      </div>
+      <table style="margin-top:8px">
+        <tr><td><code>/multi-review</code></td><td class="muted">your branch's diff · report</td></tr>
+        <tr><td><code>full --debate</code></td><td class="muted">debate to consensus, report</td></tr>
+        <tr><td><code>path api --apply</code></td><td class="muted">debate + auto-fix safe ones</td></tr>
+      </table>
+    </div>
+    <div class="card build">
+      <h2 style="font-size:16px"><span class="dot" style="background:var(--build)"></span>/goal "&lt;what you want&gt;" [flags]</h2>
+      <div style="margin:10px 0 4px">
+        <span class="pill def">--checkpoints · default</span><span class="pill">--auto</span><span class="pill">--apply</span>
+      </div>
+      <div style="margin:8px 0 4px">
+        <span class="pill">--dry-run</span><span class="pill">--gates-only</span><span class="pill">--plan-only</span>
+        <span class="pill">--target &lt;path&gt;</span><span class="pill">--rounds N</span><span class="pill">--minutes N</span>
+      </div>
+      <table style="margin-top:8px">
+        <tr><td><code>--checkpoints</code></td><td class="muted">pause for your OK each round</td></tr>
+        <tr><td><code>--auto --apply</code></td><td class="muted">unattended, on a branch</td></tr>
+        <tr><td><code>--dry-run</code> / <code>--gates-only</code></td><td class="muted">preview / no AI, spends $0</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- DECISION + SAFETY -->
+  <div class="grid two" style="margin-top:16px">
+    <div class="card">
+      <div class="role" style="color:var(--mut)">Which do I use?</div>
+      <ul class="clean">
+        <li><span class="t">Audit my PR before merge</span> → <code>/multi-review</code></li>
+        <li><span class="t">Audit + clean up safe nits</span> → <code>/multi-review full --apply</code></li>
+        <li><span class="t">Build a feature, stay in control</span> → <code>/goal "…" --checkpoints</code></li>
+        <li><span class="t">Small fix, hands-free</span> → <code>/goal "…" --auto --apply</code></li>
+        <li><span class="t">Plan before building</span> → <span class="hl">"help me plan X"</span> <span class="muted">(helpmecode)</span></li>
+        <li><span class="t">Prove it's safe — no AI/tokens</span> → <code>/goal --gates-only</code></li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="role" style="color:var(--safe)">🛡 Safety rails</div>
+      <div class="rail"><span class="ck">✓</span><span>Auto-fix runs <b>only on a branch</b> — refuses on <code>main</code>/<code>master</code></span></div>
+      <div class="rail"><span class="ck">✓</span><span><b>Report-only</b> unless you add <code>--apply</code></span></div>
+      <div class="rail"><span class="ck">✓</span><span>Critical / security findings are <b>never auto-edited</b> → <code>PLAN.md</code></span></div>
+      <div class="rail"><span class="ck">✓</span><span>Each fix is a <b>revertible commit</b>; tests go red → it reverts</span></div>
+    </div>
+  </div>
+
+  <!-- ARTIFACTS -->
+  <div class="section-title">Where results land</div>
+  <div class="card">
+    <div class="legend" style="margin-bottom:10px">
+      <span><span class="dot" style="background:var(--crit)"></span>critical</span>
+      <span><span class="dot" style="background:var(--high)"></span>high</span>
+      <span><span class="dot" style="background:var(--med)"></span>medium</span>
+      <span><span class="dot" style="background:var(--low)"></span>low</span>
+      <span><span class="dot" style="background:var(--info)"></span>info</span>
+    </div>
+    <table>
+      <tr><td><code class="mono" style="color:var(--audit)">reviews/&lt;time&gt;-&lt;scope&gt;-&lt;sha&gt;/</code></td><td class="muted">from <b>/multi-review</b> — report.md · findings.json</td></tr>
+      <tr><td><code class="mono" style="color:var(--build)">reviews/goal-&lt;time&gt;/</code></td><td class="muted">from <b>/goal</b> — log.md · manifest-*.json · <b style="color:var(--ink)">PLAN.md</b></td></tr>
+    </table>
+    <p class="lead" style="margin:10px 0 0">Always read <b style="color:var(--ink)">PLAN.md</b> — the heightened-review queue for anything the loop refused to auto-fix.</p>
+  </div>
+
+  <footer>
+    Type <code>/</code> in Claude Code to find <code>/goal</code> and <code>/multi-review</code> — they work in <span class="hl">any repo, zero setup</span>.
+    Terminal: after a one-time <code>npm link</code>, call <code>goal "…"</code> / <code>multi-review --target .</code>.
+    CI: <code>node goal.mjs --gates-only</code> (no AI, no keys).
+    Needs Node ≥18 + authed <code>claude</code> (required), <code>codex</code> (required), <code>gemini</code> (optional).
+  </footer>
+
+</div>
+</body>
+</html>

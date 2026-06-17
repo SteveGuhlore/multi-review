@@ -101,6 +101,32 @@ It runs an interview → researches (with a fresh-context fact-checker) → desi
 
 ---
 
+## 🤖 The agent team
+
+Two layers of agents do the work:
+
+**1. Reviewers — deploy on every review** (terminal *and* slash):
+
+```
+  Claude (opus) ┐
+  Codex  (gpt)  ┤ → debate to consensus → validated findings
+  Gemini        ┘
+```
+
+These are the `claude review / codex review / gemini review` lines you see in a run.
+
+**2. Builders — only in `/goal`:**
+
+| Phase | Who | Guardrail |
+|---|---|---|
+| PLAN | a Claude planner running `helpmecode` | emits `PLAN.md` + `.multi-review.json` |
+| BUILD | one fresh implementer agent **per task** | can't edit tests (writer ≠ approver) |
+| REVIEW | hands the diff to the reviewer team above | Claude is the final arbiter |
+
+> `node loop.mjs` (terminal) deploys layer 1 only. `/goal` adds layer 2 — and that whole `/goal` layer is the recent addition; before it, the tool was just the reviewer loop.
+
+---
+
 ## ✅ "Which do I use?" — 6-line decision
 
 ```
