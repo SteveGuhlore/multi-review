@@ -5,7 +5,7 @@ import {
   normPath, globToRegExp, isProtected, findingSig, mergeFindings, netValidated,
   sevRank, routeFinding, extractArr, extractObj, TerminationGuard, fingerprintFindings,
   isControlPlane, gateVerdict, buildManifest, sha256, parseAutonomy, autodetectConfig,
-  findSecrets, manifestSha, verifyChain,
+  findSecrets, manifestSha, verifyChain, pickLatestRoundFile,
 } from "../lib/core.mjs";
 
 test("normPath converts backslashes to forward slashes", () => {
@@ -120,6 +120,12 @@ test("fingerprintFindings is order-independent and stable", () => {
   const b = [{ file: "y", issue: "two" }, { file: "x", issue: "one" }];
   assert.equal(fingerprintFindings(a), fingerprintFindings(b));
   assert.notEqual(fingerprintFindings(a), fingerprintFindings([{ file: "z", issue: "three" }]));
+});
+
+test("pickLatestRoundFile picks the highest round number, ignores noise", () => {
+  assert.equal(pickLatestRoundFile(["round-1.json", "round-10.json", "round-2.json", "log.md"]), "round-10.json");
+  assert.equal(pickLatestRoundFile(["log.md", "PLAN.md"]), null);
+  assert.equal(pickLatestRoundFile([]), null);
 });
 
 test("isControlPlane flags deploy/pipeline gates", () => {

@@ -23,7 +23,7 @@ import { runSummary, classifyCommit, aggregate } from "./lib/metrics.mjs";
 import {
   autodetectConfig, isProtected, routeFinding, gateVerdict, isControlPlane,
   buildManifest, parseAutonomy, TerminationGuard, fingerprintFindings, netValidated,
-  findSecrets, manifestSha,
+  findSecrets, manifestSha, pickLatestRoundFile,
 } from "./lib/core.mjs";
 
 // ---- args ------------------------------------------------------------------
@@ -191,8 +191,23 @@ function phaseReview(cfg, models) {
   const loop = join(HERE, "loop.mjs");
   const a = ["--target", TARGET]; if (APPLY && !PLAN_ONLY) a.push("--apply");
   spawnSync("node", [loop, ...a], { shell: false, stdio: "inherit" });
-  // Harvest the loop's latest validated findings if present.
-  return { findings: [] };
+  return { findings: harvestLoopFindings() };
+}
+
+// Read the most-converged round of the newest multi-review loop run so the router sees
+// real validated findings. Returns [] if no loop output exists.
+function harvestLoopFindings() {
+  if (!existsSync("reviews")) return [];
+  const loopDirs = readdirSync("reviews").filter((d) => d.startsWith("loop-")).sort();
+  const latest = loopDirs[loopDirs.length - 1];
+  if (!latest) return [];
+  let files; try { files = readdirSync(join("reviews", latest)); } catch { return []; }
+  const roundFile = pickLatestRoundFile(files);
+  if (!roundFile) return [];
+  try {
+    const arr = JSON.parse(readFileSync(join("reviews", latest, roundFile), "utf8"));
+    return Array.isArray(arr) ? arr.filter((f) => f && f.issue) : [];
+  } catch { return []; }
 }
 
 // ---- routing + manifest ----------------------------------------------------
