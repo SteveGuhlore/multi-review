@@ -137,7 +137,10 @@ function runCli(name, cmd, cargs, input) {
 }
 function callClaude(input) { return runCli("claude", "claude", ["-p", "--model", "opus"], input).stdout || ""; }
 function callCodex(input) { const o = join(RUN_DIR, "_codex.txt"); runCli("codex", "codex", ["exec", "-s", "read-only", "--json", "-o", o], input); return existsSync(o) ? readFileSync(o, "utf8") : ""; }
-function callGemini(input) { const a = ["--approval-mode", "plan"]; if (process.env.MR_GEMINI_MODEL) a.push("--model", process.env.MR_GEMINI_MODEL); return runCli("gemini", "gemini", a, input).stdout || ""; }
+// Gemini DEFAULTS to an interactive REPL; `-p` is its headless trigger (the prompt
+// is appended after stdin). WITHOUT it, gemini waits for interactive input and the
+// model-timeout kills it — the bug that showed as "gemini skipped (timed out) … review: 0".
+function callGemini(input) { const a = ["-p", "Follow the review instructions in the input above and return ONLY the requested output (no preamble).", "--approval-mode", "plan"]; if (process.env.MR_GEMINI_MODEL) a.push("--model", process.env.MR_GEMINI_MODEL); return runCli("gemini", "gemini", a, input).stdout || ""; }
 const has = (c) => spawnSync(c, ["--version"], { shell: true, timeout: 30_000 }).status === 0;
 
 const REVIEW =
