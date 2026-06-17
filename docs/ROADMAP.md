@@ -3,6 +3,9 @@
 > Status: **proposed / for approval.** This is a planning artifact, not a commitment to code.
 > It extends the existing `multi-review` tool with an enhanced planner (`/helpmecode`),
 > anti-slop quality gates, and an outer autonomous loop that ties them together.
+>
+> Build-vs-borrow decisions, license analysis, pitfalls, and the gaps we can own are in the
+> companion deep dive: **[`RESEARCH.md`](./RESEARCH.md)**.
 
 ## North star
 
@@ -230,14 +233,46 @@ words; detail in `references/`; scripts in `scripts/`.
 ## Other one-stop-shop additions (later phases)
 
 - **Living docs / cross-session memory** — keep PRD ↔ architecture ↔ tasks in sync in `docs/`
-  so massive builds survive context windows.
+  so massive builds survive context windows. *(Fork `claude-memory-compiler`'s
+  capture→distill→reinject hooks; steal `basic-memory`'s Markdown convention, not its AGPL code.)*
 - **`/helpmecode-evolve`** — delta mode: scope change regenerates only affected artifacts,
-  then re-enters the loop. Core for "small updates."
+  then re-enters the loop. Core for "small updates." *(prd-evolve version-header + drift-guardian
+  pattern.)*
 - **Security gate** — wire the repo's `security-review` as a mandatory, non-bypassable gate.
 - **Decision log / ADRs** — extend multi-review's provenance to the whole loop: why each plan
   choice, which findings drove which re-plan. Fully auditable runs.
 - **Verify-by-running** — final gate launches the app and confirms behavior (closes the
   "green but wrong" gap), reusing the repo's `run`/`verify` skills.
+
+### Research-justified additions (see `RESEARCH.md` for sourcing)
+
+These came out of the ecosystem deep dive as both high-value and *unfilled* — the things we
+can genuinely own:
+
+- **Fail-closed test-write gate + held-out-test convergence.** The writer subagent is denied
+  write access to test/eval files; convergence gates on a **held-out suite the writer never
+  sees**, not the writer's own committed tests; the reviewer reads the diff but never re-runs or
+  edits tests. Defends against reward hacking (SpecBench: 97% on the writer's suite, 0%
+  held-out). Convergence stops being hand-wavy.
+- **Signed run-manifest (provenance bridge).** Each loop iteration writes a JSON manifest —
+  model id, prompt SHA-256, files + git SHA, validation exit codes, spec/ADR version advanced —
+  signed (gitsign / CI attestation), model id in commit trailers. Nobody bridges living-docs
+  state and cryptographic provenance; we can.
+- **Unified code+design slop taxonomy + one scoring scheme** (the owned Layer-3 ruleset),
+  importing impeccable's rules + DataWhisker's categories + Anthropic's banlist.
+- **Screenshot-graded UI gate** — "screenshot the just-built UI → score against the banlist →
+  fail the gate" — plus **cold-review for design** (fresh subagent that never saw the brief).
+  Both currently unfilled.
+- **Prompt-injection hardening as a first-class invariant** — dual-LLM/quarantine (reader has no
+  tools; tool-holder reads no untrusted content), read-only review agents, sanitized inputs, and
+  a **protected CODEOWNERS/gatekeeper file** the agent cannot edit. Extends multi-review's
+  existing untrusted-data stance to the whole loop (OWASP Agentic Top 10, 2026).
+- **Loop plumbing to adopt:** PRP-style executable `PLAN.md` with embedded validation + success
+  criteria (context-forge); a `constitution.md` of project invariants injected into every phase
+  (spec-kit); typed hooks (`pre:commit` etc.) + `.spec-context.json` resumable state (sdd).
+- **Pitfalls to engineer against:** cost runaway (hard token/cost caps, cheaper workers),
+  oscillation (stagnation/cycle detection), context rot (artifacts as files + durable ledger),
+  compounding errors (checkpoints + retry). See the `RESEARCH.md` pitfalls table.
 
 ## Phased delivery
 
@@ -249,6 +284,13 @@ words; detail in `references/`; scripts in `scripts/`.
 | **3** | Anti-slop gates: code-slop (all builds) + owned ruleset/DESIGN.md | Diffs stay minimal/idiomatic; ruleset versioned in-repo |
 | **4** | Design-slop gate + Playwright screenshot audit | UI build flagged for AI-aesthetic anti-patterns from a live screenshot |
 | **5** | Evolve mode, living docs, security gate, verify-by-running, full provenance | One-stop shop: idea → shipped, audited, slop-free |
+
+Cross-cutting through phases 2–5 (not separate phases): **fail-closed test-write gate +
+held-out-test convergence** (with phase 2), **signed run-manifest** (with phase 5 provenance),
+**screenshot-graded UI + cold-review for design** (with phase 4), **prompt-injection hardening**
+(with the security gate). Reuse, don't rebuild: **fork** superpowers (loop skeleton) + impeccable
+(design engine); **compose** the security scanner stack + Playwright; **learn-from** spec-kit /
+sdd / context-forge for plumbing. Full rationale + licenses in `RESEARCH.md`.
 
 ## Open questions / risks
 
