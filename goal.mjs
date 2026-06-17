@@ -96,7 +96,12 @@ function buildGateLadder(cfg) {
   const fromValidation = (cfg.validation?.default || []).map((cmd) => ({ name: cmd.length <= 24 ? cmd : cmd.split(" ")[0], cmd, required: true }));
   return [...builtin, ...fromValidation, ...(cfg.gates || [])];
 }
-const toolPresent = (bin) => spawnSync("command", ["-v", bin], { shell: true, timeout: 15_000 }).status === 0;
+// Cross-platform PATH probe: `command -v` is a POSIX shell builtin (absent from cmd.exe),
+// so on Windows we use `where`, which exits 0 iff the binary resolves on PATH.
+const toolPresent = (bin) =>
+  process.platform === "win32"
+    ? spawnSync("where", [bin], { shell: true, timeout: 15_000 }).status === 0
+    : spawnSync("command", ["-v", bin], { shell: true, timeout: 15_000 }).status === 0;
 
 // Built-in gates run in-process (no external tool, always available). Currently: a
 // secret scan over tracked files — gives the perimeter teeth with zero dependencies.
