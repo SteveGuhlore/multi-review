@@ -33,6 +33,7 @@ and a broad protected-paths list). Edit it to taste, or run with `--init` to jus
 | `--rounds N` | Outer review → fix → re-review rounds | 6 |
 | `--debate D` | Debate passes per round (models judge each other's findings) | 2 |
 | `--minutes N` | Wall-clock cap | 180 |
+| `--model-timeout N` | Per-model-call cap (minutes); a stuck/hung CLI sits out that pass instead of stalling the run | 8 |
 | `--init` | Just (re)generate `.multi-review.json` and exit | — |
 | `MR_GEMINI_MODEL` (env) | Gemini model override | CLI default |
 
