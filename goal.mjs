@@ -22,6 +22,7 @@ import { join } from "node:path";
 import {
   autodetectConfig, isProtected, routeFinding, gateVerdict, isControlPlane,
   buildManifest, parseAutonomy, TerminationGuard, fingerprintFindings, netValidated,
+  findSecrets,
 } from "./lib/core.mjs";
 
 // ---- args ------------------------------------------------------------------
@@ -85,13 +86,40 @@ function detectModels() {
 // the validation matrix; .goal.json can add mutation/coverage/scanners/a11y/etc.
 // Control-plane gates (deploy/pipeline) are never run autonomously.
 function buildGateLadder(cfg) {
+  // Always-on, zero-dependency perimeter gate first, then the validation matrix, then the
+  // optional configured ladder. Opt out with "secretScan": false in config.
+  const builtin = cfg.secretScan === false ? [] : [{ name: "secrets (builtin)", builtin: "secrets", required: true }];
   const fromValidation = (cfg.validation?.default || []).map((cmd) => ({ name: cmd.length <= 24 ? cmd : cmd.split(" ")[0], cmd, required: true }));
-  return [...fromValidation, ...(cfg.gates || [])];
+  return [...builtin, ...fromValidation, ...(cfg.gates || [])];
 }
 const toolPresent = (bin) => spawnSync("command", ["-v", bin], { shell: true, timeout: 15_000 }).status === 0;
 
+// Built-in gates run in-process (no external tool, always available). Currently: a
+// secret scan over tracked files — gives the perimeter teeth with zero dependencies.
+function trackedFiles() {
+  const r = spawnSync("git", ["ls-files"], { shell: true, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  return (r.stdout || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean).filter((f) => !f.startsWith("reviews/"));
+}
+function builtinSecrets() {
+  const hits = [];
+  for (const f of trackedFiles()) {
+    let body;
+    try { body = readFileSync(join(ROOT, f), "utf8"); } catch { continue; }
+    for (const h of findSecrets(body)) hits.push({ ...h, file: f });
+  }
+  if (hits.length) for (const h of hits.slice(0, 10)) log(`      ${C.r}secret${C.x} ${h.file}:${h.line} ${C.dim}${h.type} ${h.match}${C.x}`);
+  return hits.length === 0;
+}
+const BUILTINS = { secrets: builtinSecrets };
+
 function runGate(gate) {
   if (isControlPlane(gate)) return { name: gate.name, pass: null, skipped: true, reason: "control-plane (never autonomous)", required: gate.required };
+  if (gate.builtin) {
+    if (DRY) return { name: gate.name, pass: true, dry: true, required: gate.required };
+    const fn = BUILTINS[gate.builtin];
+    if (!fn) return { name: gate.name, pass: false, reason: `unknown builtin '${gate.builtin}'`, required: gate.required };
+    return { name: gate.name, pass: fn(), exitCode: null, required: gate.required };
+  }
   if (DRY) return { name: gate.name, pass: true, dry: true, required: gate.required };
   const [cmd, ...rest] = gate.cmd.split(" ");
   // Degradable, but safely: if the tool is absent, a REQUIRED gate fails closed (we can't

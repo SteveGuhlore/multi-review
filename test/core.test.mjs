@@ -5,6 +5,7 @@ import {
   normPath, globToRegExp, isProtected, findingSig, mergeFindings, netValidated,
   sevRank, routeFinding, extractArr, extractObj, TerminationGuard, fingerprintFindings,
   isControlPlane, gateVerdict, buildManifest, sha256, parseAutonomy, autodetectConfig,
+  findSecrets,
 } from "../lib/core.mjs";
 
 test("normPath converts backslashes to forward slashes", () => {
@@ -176,4 +177,29 @@ test("autodetectConfig falls back to a broad extension set with no manifests", (
   const cfg = autodetectConfig({ exists: () => false, read: () => "" });
   assert.ok(cfg.extensions.length > 3);
   assert.deepEqual(cfg.validation.default, []);
+});
+
+test("findSecrets detects well-known credential formats and redacts them", () => {
+  // Built from fragments so these source lines don't themselves trip the repo's own scan.
+  const text = [
+    'const k = "AKIA' + "IOSFODNN7EXAMPLE" + '";',
+    "-----BEGIN OPENSSH " + "PRIVATE KEY-----",
+    'token = "ghp_' + "0123456789abcdefghijklmnopqrstuvwxyz" + '";',
+  ].join("\n");
+  const hits = findSecrets(text);
+  const types = hits.map((h) => h.type).sort();
+  assert.deepEqual(types, ["aws-access-key-id", "github-token", "private-key-block"]);
+  assert.ok(hits.every((h) => !/EXAMPLE|abcdefghij/.test(h.match)), "matches must be redacted");
+  assert.equal(hits.find((h) => h.type === "aws-access-key-id").line, 1);
+});
+
+test("findSecrets honors the allowlist pragma", () => {
+  const text = 'const k = "AKIA' + 'IOSFODNN7EXAMPLE";  // goal:allow-secret';
+  assert.deepEqual(findSecrets(text), []);
+});
+
+test("findSecrets is quiet on clean code and bad input", () => {
+  assert.deepEqual(findSecrets("const x = 1 + 2; // nothing secret here"), []);
+  assert.deepEqual(findSecrets(""), []);
+  assert.deepEqual(findSecrets(null), []);
 });
