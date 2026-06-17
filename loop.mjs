@@ -112,9 +112,13 @@ function extractArr(t) { if (!t) return []; const m = t.match(/```(?:json)?\s*([
 function extractObj(t) { if (!t) return {}; const m = t.match(/```(?:json)?\s*([\s\S]*?)```/i); const r = m ? m[1] : t; const a = r.indexOf("{"), z = r.lastIndexOf("}"); if (a < 0 || z <= a) return {}; try { return JSON.parse(r.slice(a, z + 1)); } catch { return {}; } }
 
 // ---- model CLIs (headless, read-only) ----
-function callClaude(input) { return (spawnSync("claude", ["-p", "--model", "opus", input], { encoding: "utf8", shell: true, maxBuffer: 64 * 1024 * 1024 }).stdout) || ""; }
+// The prompt is passed via STDIN, never as a command-line arg: the review bundle
+// can be ~180KB and Windows cmd.exe (shell:true) truncates a command line at
+// ~8191 chars, so an arg-passed prompt silently arrives mangled and the model
+// returns nothing (this is why only codex — already on stdin — produced findings).
+function callClaude(input) { return (spawnSync("claude", ["-p", "--model", "opus"], { input, encoding: "utf8", shell: true, maxBuffer: 64 * 1024 * 1024 }).stdout) || ""; }
 function callCodex(input) { const o = join(RUN_DIR, "_codex.txt"); spawnSync("codex", ["exec", "-s", "read-only", "--json", "-o", o], { input, encoding: "utf8", shell: true, maxBuffer: 64 * 1024 * 1024 }); return existsSync(o) ? readFileSync(o, "utf8") : ""; }
-function callGemini(input) { const a = ["-p", input, "--approval-mode", "plan"]; if (process.env.MR_GEMINI_MODEL) a.push("--model", process.env.MR_GEMINI_MODEL); return (spawnSync("gemini", a, { encoding: "utf8", shell: true, maxBuffer: 64 * 1024 * 1024 }).stdout) || ""; }
+function callGemini(input) { const a = ["--approval-mode", "plan"]; if (process.env.MR_GEMINI_MODEL) a.push("--model", process.env.MR_GEMINI_MODEL); return (spawnSync("gemini", a, { input, encoding: "utf8", shell: true, maxBuffer: 64 * 1024 * 1024 }).stdout) || ""; }
 const has = (c) => spawnSync(c, ["--version"], { shell: true }).status === 0;
 
 const REVIEW =
