@@ -274,6 +274,30 @@ can genuinely own:
   oscillation (stagnation/cycle detection), context rot (artifacts as files + durable ledger),
   compounding errors (checkpoints + retry). See the `RESEARCH.md` pitfalls table.
 
+### Round-2 net-new capabilities (full detail + sourcing in `RESEARCH.md`)
+
+A second research pass found these high-leverage additions *outside* the current scope —
+prioritized, with the gaps we can own:
+
+- **Mutation + diff-coverage gates** — kill the assertion-free-LLM-test failure mode (Stryker
+  `--incremental`, `diff_cover`). Gap to own: **mutation-guided test synthesis** (Meta ACH).
+- **Loop-level eval gate + Langfuse meta-backend** — SWE-bench-style held-out set through the
+  *whole loop* + promptfoo regression on every prompt/skill edit; Langfuse ingests Claude Code's
+  native OTel for cost-per-loop. Prerequisite for safe self-improvement.
+- **Pre-install malicious-package gate (GuardDog)** — closes a structural blind spot the code
+  scanners can't cover; the **scanners-are-deps** rule (pin by SHA, least-privilege CI, verify
+  attestations) after the March-2026 Trivy compromise. Gap: an **autonomous keep-deps-green+safe
+  worker** (OSV-fix proposes, our loop validates).
+- **Issue→spec→PR→release orchestration** — `claude-code-action` + Issue Forms + Spec Kit +
+  `gh issue develop` + `semantic-release`; the gap between "writes code" and "ships from an idea."
+- **Serena (LSP-over-MCP) symbol grounding + impact-scoped tests + dead-code/tech-debt backlog** —
+  compiler-accurate grounding; run only tests a diff affects; a self-refilling work queue.
+  Gap: **scope → edit-within-scope → re-verify-scope** autonomous edits.
+- **Progressive delivery + deterministic auto-rollback** (Argo Rollouts + OpenFeature) — safe path
+  to prod where rollback is controller-enforced, not LLM-judged. Keep agent in the **data-plane**.
+- **Self-evaluating loop** tracking its own **bug-escape-rate + slop-rate** and only keeping a
+  self-rewrite if those trends improve — the long-game differentiator.
+
 ## Phased delivery
 
 | Phase | Deliverable | Exit criteria |

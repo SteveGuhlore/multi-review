@@ -199,3 +199,261 @@ Building Effective Agents anthropic.com/research/building-effective-agents ·
 Multi-agent research system anthropic.com/engineering/multi-agent-research-system ·
 SpecBench arxiv.org/html/2605.21384 · OWASP Agentic Top 10 genai.owasp.org ·
 SLSA slsa.dev
+
+---
+
+# Round 2 — net-new capabilities (beyond the current roadmap)
+
+A second deep-research pass, scoped *only* to features we had **not** already designed
+(planner, multi-review, anti-slop, the loop, subagents, memory, provenance, code security
+scanners, basic verify-by-running were excluded). Five angles: testing/quality gates,
+supply-chain/dependency intelligence, codebase intelligence/retrieval, delivery/ops, and the
+agent meta-layer (economics/evals/self-improvement). Verdicts as before: FORK / COMPOSE /
+LEARN-FROM.
+
+## A. Testing & quality gates beyond review
+
+The recurring failure mode — LLM tests that *pass but assert nothing* — finally gets a real
+defense here.
+
+- **Mutation testing = the keystone gate.** `StrykerJS` (Apache-2.0, mature, `--incremental`
+  diff-scoped + `thresholds.break` → exit 1), `PIT` (Java), `mutmut` (Python). Injects faults;
+  if tests still pass, they're theater. Turns "green" into "tests have teeth." **COMPOSE.**
+- **Diff-coverage gate** — `diff_cover --fail-under=N` (Apache-2.0, language-agnostic over
+  LCOV/Cobertura/JaCoCo). Cheapest high-signal gate; stops "added code, no tests." **COMPOSE.**
+- **Property-based / fuzz** — `fast-check` (MIT, dominant JS/TS), `Hypothesis` (MPL-2.0), `jqwik`
+  (EPL-2.0). Run with a fixed seed for determinism; the **shrunk counterexample is an ideal
+  fix-prompt** for the next iteration. **COMPOSE.**
+- **Flaky-test detection** — `pytest-flakefinder`, `pytest-rerunfailures`, Jest retries. New
+  tests run N× *before admission*; nondeterministic → reject the *test*, not the code. Protects
+  the loop's own signal (a flaky red is a false reject that derails an autonomous run). **COMPOSE.**
+- **Visual regression** (distinct from anti-slop aesthetics) — `Playwright toHaveScreenshot()`
+  (built-in, free, deterministic, baselines in git) catches *unintended* UI change regardless of
+  whether it looks good. Near-zero cost since Playwright is already in the loop. **COMPOSE.**
+- **Contract / BDD** — `Pact` (`can-i-deploy` is a literal deploy gate) for multi-service repos;
+  Gherkin for spec→acceptance-test. **LEARN-FROM** (high value only for multi-service / cheap-spec).
+
+**Gap to own:** a productized **mutation-guided test-synthesis** primitive (Meta's ACH — 73%
+engineer-accept internally, no OSS release). *diff → generate targeted mutants → LLM writes the
+killing test → keep only mutant-killing, non-flaky, coverage-raising tests → emit as a
+deterministic gate.* Stryker does mutation but writes no tests; Qodo Cover writes tests but is
+unmaintained/AGPL and doesn't validate against mutants. Buildable on Stryker's JSON mutant API +
+our multi-model reviewer.
+
+## B. Supply-chain & dependency intelligence
+
+**Reframing finding:** in **March 2026 Trivy itself was supply-chain compromised** (malicious
+binary + 76/77 `trivy-action` tags force-pushed to credential-stealing malware, self-propagating
+via stolen CI tokens — Aqua's own advisory + Microsoft + Wiz + CrowdStrike). **The scanners are
+deps too.** First-class design rule: **pin every gate tool by commit SHA (not tag), run with
+minimal CI secrets, verify Sigstore/cosign attestations, and diversify** — never consolidate the
+gates into one all-in-one binary.
+
+- **The blind spot in our current stack:** semgrep/gitleaks/codeql + review scan *our* code;
+  **nothing inspects an incoming third-party package** for install hooks / typosquatting /
+  maintainer-takeover before it lands (exactly the attack class above). Add **GuardDog** (Datadog,
+  Apache-2.0, CLI-gateable) as a pre-install gate, optionally **Socket.dev**. **COMPOSE.**
+- **Autonomous "make deps green" engine** — `OSV-Scanner` Guided Remediation (`osv-scanner fix`,
+  Apache-2.0) computes the **minimum-safe** upgrade (vs. Renovate's "newer"); **OWASP
+  Dependency-Track** (Apache-2.0) fires when a *new* CVE hits an already-shipped SBOM. Neither
+  *validates* a fix — our loop is the missing middle. **COMPOSE.**
+- **Defaults to layer:** `OSV-Scanner` + `Grype` (SCA), `Syft` (SBOM), `Checkov` + `hadolint`
+  (IaC/Dockerfile — both non-Aqua, reducing concentration risk), `Renovate` (routine upgrades —
+  AGPL, invoke as CLI), `ScanCode` + a **GPL/AGPL/SSPL deny-list** (license; AGPL triggers on
+  *network use* for SaaS), `OpenSSF Scorecard` (vet a new dep before adding). `cosign`
+  verify-attestation as an admission gate.
+- **Avoid:** Trivy as the default binary in 2026 (compromise); `tfsec` (merged into Trivy, dead);
+  `Terrascan` (archived Nov 2025).
+
+**Gap to own:** an **autonomous "keep deps green + safe" worker** — Dependency-Track triggers,
+OSV-fix/Renovate proposes, GuardDog + license deny-list + Scorecard gate, **our plan→build→review
+loop validates and merges**. Renovate proposes but doesn't reason; Dependency-Track monitors but
+can't act; OSV-fix patches but doesn't validate; nothing screens the package for malice first. We
+own the missing correctness+safety bar.
+
+## C. Codebase intelligence & retrieval
+
+Grounding the agent in a large/unfamiliar repo (distinct from cross-session memory). *(License
+correction from the research: **Sourcegraph never went BSL** — it went Apache-2.0 → proprietary
+→ private; Cody is closed/enterprise-only now. Both LEARN-FROM only.)*
+
+- **Symbol-grounding spine — the top pick (COMPOSE):** `Serena` (MIT, ~23k★, 40+ langs, active)
+  — **LSP-over-MCP**: gives the loop compiler-accurate go-to-def / find-references / call-hierarchy
+  / symbol-level edits. Exact grounding that beats embedding-fuzzy RAG and feeds *both* "which
+  module to target" and "what does this change affect." Single highest-leverage compose in this
+  area. `ast-grep` (MIT, ships MCP) for deterministic structural find/rewrite alongside it.
+- **Deterministic scoping layer (COMPOSE/LEARN):** Aider's **tree-sitter + PageRank repo map**
+  (Apache-2.0; self-contained algorithm, or `RepoMapper` as MCP) — ranked, token-budgeted
+  architecture skeleton injected pre-edit. Plus **`dependency-cruiser`** (MIT, native Mermaid) /
+  `madge` (JS/TS), `pydeps` (Python), `go-callvis` (Go): import/call graphs for blast radius —
+  and dependency-cruiser **doubles as an architecture gate** that fails the loop when a change
+  violates layer rules. Trust these deterministic extractors as ground truth; treat LLM-native
+  diagrammers (CodeBoarding) as an *intent* layer to verify against them, never as authoritative.
+- **Code-RAG stack (COMPOSE):** `CocoIndex` (Apache-2.0, real-time tree-sitter incremental
+  indexing — only changed files re-embed) → `LanceDB` (embedded, local) or `Qdrant` (server) —
+  **both Apache-2.0; the "Qdrant relicensed to BSL/SSPL" rumor is false** → embeddings:
+  `Qwen3-Embedding` (Apache-2.0, quality) / `jina-embeddings-v2-base-code` (Apache-2.0, CPU-only).
+  Only `voyage-code-3` is proprietary. `Continue` is the best end-to-end blueprint but is
+  **archived in 2026** — learn, don't depend. For onboarding: `DeepWiki-Open` (MIT, repo→wiki+RAG),
+  `Repomix`/`Gitingest` (flatten repo to a prompt-ready file for small subtrees).
+- **Large-scale refactors / codemods (COMPOSE):** `ast-grep` (MIT, YAML-rule rewrites + MCP),
+  `Codemod` (Apache-2.0, Rust, ships an MCP server + fixture-test harness + approval gates),
+  `GritQL` (now **MIT**, donated to Biome; `--dry-run` + `--json` + clean-tree guard), `libcst`
+  (MIT, format-preserving Python), `jscodeshift` (MIT), `comby` (MPL-2.0, language-agnostic),
+  `OpenRewrite` (Apache-2.0 core — **but Moderne recipes are source-available/proprietary**).
+  `rope` is LGPL (flag); `bowler` archived/dead — avoid.
+- **Impact analysis / blast-radius scoping (COMPOSE):** LSP call-hierarchy via Serena is the
+  compiler-accurate path; `SCIP` (Apache-2.0, persistent cross-repo index) + `github/stack-graphs`
+  (incremental name resolution, no build needed) for huge repos; `Nx affected` / `Bazel rdeps`
+  (zero-cost if already present); `pytest-testmon`/JaCoCo (coverage-based test selection) to run
+  only the tests a diff affects. Dead/abandoned: PyCG, code2flow, java-callgraph.
+- **Dead-code + tech-debt backlog generator (COMPOSE) — a self-refilling work queue:** `knip`
+  (ISC, JS/TS, has auto-fix), `vulture` (MIT, Python, confidence scoring — gate on
+  `--min-confidence 100`), Go `cmd/deadcode` + staticcheck `U1000`, `cargo-machete`→`cargo-udeps`
+  (Rust), ranked by a homegrown **churn×complexity hotspot score** (`scc`/`lizard`/`radon` +
+  `git log`, replicating CodeScene's technique for free; `qlty` as a polyglot aggregator — Fair
+  Source/BSL). Each item is a small atomic change gated on build+test — a perfect fit for the loop.
+
+**Gaps to own:** (1) **impact-analysis-scoped autonomous edits** — nobody closes the loop where
+the agent *computes* the transitive affected call-sites/tests for a planned edit, *constrains* the
+codemod to exactly that set, then *re-derives* impact afterward to prove nothing leaked outside the
+predicted blast radius. SCIP + a codemod engine + verify-by-running are the raw ingredients; the
+"scope → edit-within-scope → re-verify-scope" orchestration is net-new. (2) A
+**ground-truth-vs-LLM-diagram reconciler** that flags when the planner's architecture mental-model
+diverges from the real import/call graph — an anti-hallucination grounding check.
+
+## D. Delivery & ops — idea → shipped
+
+- **Event-driven from a real issue (COMPOSE):** `anthropics/claude-code-action` (MIT) on an
+  issue-label/`@claude` event → **GitHub Issue Form** (structured) parsed via **Spec Kit**
+  (`/specify→/plan→/tasks`) → branch via `gh issue develop` → close with `semantic-release` (MIT)
+  / `release-please` (Apache-2.0) on merge. `Conventional Commits` + `commitlint` as the contract;
+  `pr-size-labeler` (`fail_if_xl`) to **force the agent to split mega-PRs.** Caveats:
+  claude-code-action **does not auto-create PRs** (bridge with `gh pr create`/`gh pr merge
+  --auto` + branch protection); use a **GitHub App token** so bot commits re-trigger CI;
+  **sanitize untrusted issue text** (prompt-injection).
+- **CI generation + fix-forward loop (COMPOSE/LEARN):** `act` (run workflows locally pre-push),
+  `dagger` (code-defined pipelines, no local/CI drift), `get_job_logs`/`gh run rerun --failed`
+  (read-and-react). Fix-forward pattern: classify failure → patch on temp branch → PR (never
+  auto-merge) → re-run failed jobs → **cap retries ~3** → escalate. **Agent in the data-plane**
+  (code/test fixes); **control-plane** (pipeline config, deploy policy) gated behind human review.
+- **Progressive delivery with deterministic auto-rollback (COMPOSE):** `Argo CD` (deploy = merged
+  manifest) + `Argo Rollouts` (Apache-2.0, CNCF Graduated — metric-analyzed canary vs.
+  Prometheus/`Sloth` SLOs, `failureLimit` → **automatic abort+revert with zero agent
+  involvement**) + `OpenFeature`/`flagd` (ship behind a disabled flag, flip via a git commit).
+  Rollback is controller-enforced, **not LLM-judged** — the right property for autonomy. Avoid
+  Keptn (CNCF-archived Sep 2025).
+- **Regression gates as required checks (COMPOSE):** a11y via `@axe-core/playwright` (MPL-2.0,
+  file-scoped copyleft; block on critical/serious) + `Lighthouse CI`; performance via
+  `github-action-benchmark` (MIT) or `Bencher` (statistical thresholds). The **baseline-ratchet**
+  (fail only on *new* regressions, not pre-existing debt) is what makes these usable on real repos.
+
+**Gaps to own:** (1) **closed-loop autonomous production remediation** is unsolved in OSS —
+deterministic deploy/rollback is production-proven and agentic-SRE tools only *diagnose*; the
+consensus is agent stays data-plane, controllers stay control-plane. We can be the **connective
+tissue** (agent proposes config + SLO defs + flag flips; controllers enforce) without making the
+agent the rollback decision-maker. (2) **Baseline-ratcheting for regression gates** has no clean
+OSS standard — every tool reinvents it; we'd build the violation-fingerprint/baseline-diff layer.
+
+## E. Agent meta-layer — economics, evals, self-improvement
+
+The self-governance layer: what each run costs, whether the loop is improving, and safe
+self-modification.
+
+- **Unified meta-backend (COMPOSE):** `Langfuse` (MIT, self-hostable) ingests Claude Code's
+  **native OTel traces** (cost-per-subagent for free) and reuses the *same* instance for eval
+  scores and human-feedback annotations — one tool instead of three. (`ccusage` MIT for a quick
+  local spend readout. Helicone entered maintenance mode Mar 2026 — skip.)
+- **Loop-level eval gate (COMPOSE):** run a small **SWE-bench-style held-out set through the
+  *whole loop*** (`Inspect AI`, MIT) + `promptfoo` (MIT) regression on every prompt/skill edit →
+  **fail the PR on regression.** Converts "we tweaked a prompt" into a measured decision; the
+  prerequisite for safe self-improvement. (`DeepEval` Apache-2.0 is the pytest-native alternative.)
+- **Model routing / budget (COMPOSE/LEARN):** `LiteLLM` proxy (MIT) for per-run budget caps +
+  model-mix; `RouteLLM` (Apache-2.0) strong-vs-cheap routing is a calibration project (learn the
+  pattern). Cheaper workers under an Opus orchestrator.
+- **Gated self-improvement (COMPOSE + discipline):** `claude-reflect-system` writes lessons from
+  corrections (`learnings.md`); **every self-rewritten skill must pass the eval gate before going
+  live** (the SAGE/Trace2Skill discipline). Voyager is the skill-library north star. PRELUDE/PROSE
+  — treat the reviewer's *edits* to a build as a preference signal.
+- **Runtime guardrails (COMPOSE):** NeMo Guardrails **execution rails** (Apache-2.0) for runtime
+  action policy; `Invariant` (now Snyk) guards the agent's **tool/MCP surface** — distinct from
+  code SAST.
+
+**Gap to own:** a **self-evaluating loop that tracks its own bug-escape-rate** (defects merged
+then reverted/hotfixed) **and slop-rate** (anti-slop flags per KLOC) as first-class longitudinal
+metrics, and **only keeps a self-rewrite if those trends improve on the held-out set.** Langfuse
+stores scores but defines no such metric; promptfoo/Inspect are point-in-time; self-improvement
+frameworks rewrite skills but don't *prove* the rewrite lowered escapes. "The system grades its
+own bug-escape rate and only ships self-changes that lower it" is unbuilt.
+
+## Cross-cutting design principles surfaced in round 2
+
+1. **Determinism at the gate.** Every addition reduces to an exit-code / threshold the loop can
+   block on — model judgment proposes, deterministic checks gate.
+2. **The toolchain is part of the threat model.** Pin gate tools by SHA, least-privilege CI
+   tokens, verify attestations, diversify vendors (Trivy compromise).
+3. **Data-plane vs. control-plane.** The agent edits code/tests/config *proposals*; anything that
+   touches production (deploy policy, rollback) stays behind deterministic controllers or a human.
+4. **Baseline-ratchet, not absolute bars.** Regression/quality gates fail on *new* regressions so
+   they're adoptable on debt-laden repos.
+
+## Prioritized net-new shortlist (highest leverage first)
+
+1. **Mutation + diff-coverage gates** (A) — directly kills the assertion-free-test failure mode;
+   cheap, language-agnostic, deterministic.
+2. **Loop-level eval gate + Langfuse meta-backend** (E) — makes every prompt/skill change a
+   measured decision and gives cost-per-loop; prerequisite for self-improvement.
+3. **Pre-install malicious-package gate (GuardDog)** (B) — closes a structural blind spot the
+   current code-scanners cannot cover.
+4. **Issue→spec→PR→release orchestration** (D) — the biggest gap between "writes code" and "ships
+   from an idea"; makes the loop event-driven and terminal at a versioned release.
+5. **Serena (LSP-over-MCP) symbol grounding + impact-scoped tests** (C) — compiler-accurate
+   go-to-def/references/call-hierarchy beats fuzzy RAG; run only the tests a diff affects.
+6. **Autonomous keep-deps-green+safe worker** (B) — greenfield; our loop is the missing validator.
+7. **Progressive delivery + deterministic auto-rollback** (D) — safe path to prod without
+   LLM-judged rollback.
+8. **Self-evaluating loop (bug-escape + slop rate)** (E) — the long-game differentiator.
+
+## New gaps we can own (consolidated)
+
+- Mutation-guided test synthesis primitive (A).
+- Autonomous keep-deps-green+safe worker with a real correctness/safety bar (B).
+- Impact-analysis-scoped autonomous edits (scope → edit-within-scope → re-verify-scope) (C).
+- Ground-truth-vs-LLM-diagram reconciler as a planner anti-hallucination check (C).
+- A self-refilling dead-code + tech-debt backlog the loop burns down, gated on build+test (C).
+- Data-plane/control-plane connective tissue for safe autonomous prod (D).
+- Baseline-ratcheting regression-gate standard (D).
+- Self-evaluating loop tracking + gating on its own bug-escape & slop rates (E).
+
+## Round-2 sourcing caveats (honesty)
+
+GitHub API was rate-limited from the research environment; star counts / dates were corroborated
+against live HTML, raw LICENSE files, and package registries. The **Trivy compromise** is
+confirmed by Aqua's own GHSA advisory + Microsoft + Wiz + CrowdStrike (high confidence). Some
+SCA/comparison numbers came from vendor blogs (treat as marketing, not benchmarks). Re-verify
+before depending: `jqwik` (EPL-2.0) and `Pact` license lines; `Codemod` funding (stand only on
+"active, Apache-2.0, shipping 2026"); the OTel auto-instrumentation per-tool maturity table was
+not fully completed this pass. Meta's ACH and RouteLLM are research, not productized releases.
+
+## Round-2 sources (condensed)
+
+StrykerJS stryker-mutator.io · diff_cover github.com/Bachmann1234/diff_cover · fast-check
+github.com/dubzzz/fast-check · Hypothesis hypothesis.works · Meta ACH engineering.fb.com ·
+Trivy compromise github.com/aquasecurity/trivy/security/advisories/GHSA-69fq-xp46-6x23 ·
+OSV-Scanner google.github.io/osv-scanner · Dependency-Track owasp.org/www-project-dependency-track ·
+GuardDog securitylabs.datadoghq.com · Socket socket.dev · Syft/Grype anchore (github.com) ·
+Checkov / hadolint · Renovate docs.renovatebot.com · OpenSSF Scorecard github.com/ossf/scorecard ·
+Serena github.com/oraios/serena · ast-grep github.com/ast-grep/ast-grep · SCIP github.com/sourcegraph/scip ·
+stack-graphs github.com/github/stack-graphs · dependency-cruiser github.com/sverweij/dependency-cruiser ·
+knip github.com/webpro-nl/knip · vulture github.com/jendrikseipp/vulture · qlty github.com/qltysh/qlty ·
+CocoIndex github.com/cocoindex-io/cocoindex · Qdrant github.com/qdrant/qdrant · LanceDB
+github.com/lancedb/lancedb · Aider repomap aider.chat/docs/repomap.html · Codemod
+github.com/codemod-com/codemod · GritQL github.com/biomejs/gritql · libcst github.com/Instagram/libcst ·
+Jelly github.com/cs-au-dk/jelly · Nx nx.dev · Bazel bazel.build · pytest-testmon
+github.com/tarpas/pytest-testmon · claude-code-action github.com/anthropics/claude-code-action ·
+spec-kit github.com/github/spec-kit · semantic-release / release-please · Argo Rollouts
+argoproj.github.io/rollouts · OpenFeature openfeature.dev · axe-core github.com/dequelabs/axe-core ·
+github-action-benchmark github.com/benchmark-action/github-action-benchmark · Bencher bencher.dev ·
+Langfuse github.com/langfuse/langfuse · Claude Code OTel code.claude.com/docs/en/monitoring-usage ·
+Inspect AI / SWE-bench github.com/swe-bench/SWE-bench · promptfoo · LiteLLM github.com/BerriAI/litellm ·
+RouteLLM github.com/lm-sys/routellm · NeMo Guardrails · Invariant github.com/invariantlabs-ai/invariant
