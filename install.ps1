@@ -11,10 +11,10 @@ New-Item -ItemType Directory -Force -Path `
 Copy-Item (Join-Path $src "commands\multi-review.md") (Join-Path $claude "commands\multi-review.md") -Force
 Copy-Item (Join-Path $src "commands\goal.md") (Join-Path $claude "commands\goal.md") -Force
 
-# Engines + shared core (goal.mjs imports ./lib/core.mjs, so lib/ must travel with it)
+# Engines + shared lib (goal.mjs imports ./lib/{core,metrics}.mjs, so all of lib/ must travel with it)
 Copy-Item (Join-Path $src "loop.mjs") (Join-Path $claude "multi-review\loop.mjs") -Force
 Copy-Item (Join-Path $src "goal.mjs") (Join-Path $claude "multi-review\goal.mjs") -Force
-Copy-Item (Join-Path $src "lib\core.mjs") (Join-Path $claude "multi-review\lib\core.mjs") -Force
+Copy-Item (Join-Path $src "lib\*.mjs") (Join-Path $claude "multi-review\lib\") -Force
 Copy-Item (Join-Path $src ".goal.example.json") (Join-Path $claude "multi-review\.goal.example.json") -Force
 Copy-Item (Join-Path $src "bin\codex-review.ps1") (Join-Path $claude "multi-review\codex-review.ps1") -Force
 Copy-Item (Join-Path $src "bin\gemini-review.ps1") (Join-Path $claude "multi-review\gemini-review.ps1") -Force
