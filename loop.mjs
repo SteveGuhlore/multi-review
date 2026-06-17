@@ -131,14 +131,46 @@ function validate() {
   return { ok: true };
 }
 
+// Files changed vs HEAD (staged or not), excluding the run's own artifacts.
+function changedFiles() {
+  const o = spawnSync("git", ["diff", "--name-only", "HEAD"], { encoding: "utf8", shell: true }).stdout || "";
+  return o.split(/\r?\n/).map((s) => s.trim()).filter(Boolean).filter((f) => !f.startsWith("reviews/"));
+}
+
+// Keep the run's artifacts (and the temp commit-message file) out of commits and
+// out of `git clean`'s reach (clean skips gitignored paths). Idempotent.
+function ensureIgnored(entry) {
+  const gi = ".gitignore";
+  const cur = existsSync(gi) ? readFileSync(gi, "utf8") : "";
+  if (!cur.split(/\r?\n/).some((l) => l.trim() === entry)) writeFileSync(gi, cur + (cur && !cur.endsWith("\n") ? "\n" : "") + entry + "\n");
+}
+
 // Auto-fix non-security validated findings (validation-gated, revertible).
 function applyFix(f) {
   const prompt = `Apply EXACTLY this one fix and nothing else. File: ${f.file}. Issue: ${f.issue}. Fix: ${f.fix}. ` +
     `Edit ONLY ${f.file}; keep it minimal and behavior-preserving; do NOT edit tests to pass. Reply DONE.`;
   spawnSync("claude", ["-p", "--model", "opus", "--permission-mode", "acceptEdits", prompt], { encoding: "utf8", shell: true, maxBuffer: 64 * 1024 * 1024 });
   const v = validate();
-  if (v.ok) { spawnSync("git", ["add", f.file], { shell: true }); spawnSync("git", ["commit", "-m", `fix(auto): ${f.issue.slice(0, 60)} [multi-review]`], { shell: true }); return true; }
-  spawnSync("git", ["checkout", "--", f.file], { shell: true }); return false;
+  if (v.ok) {
+    // Stage EVERYTHING the fix changed — the editor may have correctly touched
+    // more than f.file (e.g. a companion migration). reviews/ is gitignored, so
+    // the run's own artifacts are never swept in.
+    spawnSync("git", ["add", "-A"], { shell: true });
+    const touched = changedFiles();
+    // Commit via -F <file>, never a shell-quoted -m: issue text contains (),
+    // backticks and quotes that mangle the message and silently fail the commit.
+    const msgFile = join(RUN_DIR, "_commit_msg.txt");
+    const subject = `fix(auto): ${String(f.issue || "").replace(/\s+/g, " ").trim().slice(0, 72)} [multi-review]`;
+    writeFileSync(msgFile, `${subject}\n\nAuto-applied by multi-review (validation-gated).\nFiles: ${touched.join(", ") || f.file}\n`);
+    const c = spawnSync("git", ["commit", "-F", msgFile], { encoding: "utf8", shell: true });
+    if (c.status === 0) { log(`    ✓ committed — files: ${touched.join(", ") || f.file}`); return true; }
+    log(`    ⚠ validation passed but commit failed: ${(c.stderr || "").trim().slice(0, 200)}`);
+  }
+  // Revert the whole attempt (tracked edits + any new files the editor created);
+  // git clean respects .gitignore so reviews/ and node_modules are untouched.
+  spawnSync("git", ["reset", "--hard", "HEAD"], { shell: true });
+  spawnSync("git", ["clean", "-fd"], { shell: true });
+  return false;
 }
 
 function writePlan(items) {
@@ -151,7 +183,11 @@ function writePlan(items) {
 function main() {
   const models = [["claude", callClaude], ["codex", callCodex], ["gemini", callGemini]].filter(([c]) => has(c));
   log(`# multi-review loop (debate)\nTarget: ${TARGET} · models: ${models.map(([n]) => n).join(", ")} · mode: ${APPLY ? "APPLY" : "report"} · caps: ${MAX_ROUNDS} rounds × ${DEBATE_PASSES} debate passes / ${MAX_MINUTES}m · exts: ${EXT.length}\n`);
-  if (APPLY) { const b = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", shell: true }).stdout.trim(); if (b === "main" || b === "master") { log("REFUSING --apply on default branch."); process.exit(2); } }
+  if (APPLY) {
+    const b = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", shell: true }).stdout.trim();
+    if (b === "main" || b === "master") { log("REFUSING --apply on default branch."); process.exit(2); }
+    ensureIgnored("reviews/");  // keep run artifacts out of the fix commits
+  }
 
   const planMap = new Map();
   for (let round = 1; round <= MAX_ROUNDS; round++) {
