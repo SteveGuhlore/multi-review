@@ -1,0 +1,19 @@
+{
+  "name": "multi-review",
+  "version": "0.2.0",
+  "description": "Autonomous multi-model review + /goal build↔review loop. Language-agnostic, zero-config.",
+  "type": "module",
+  "bin": {
+    "multi-review": "loop.mjs",
+    "goal": "goal.mjs"
+  },
+  "scripts": {
+    "test": "node --test",
+    "goal": "node goal.mjs",
+    "loop": "node loop.mjs"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

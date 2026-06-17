@@ -1,0 +1,28 @@
+name: ci
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # No deps to install — the core + tests are dependency-free (node:test).
+      - name: Unit tests (lib/core.mjs)
+        run: npm test
+      # Dogfood: run /goal's deterministic spine as a CI gate. --gates-only runs the
+      # gate ladder + emits a run-manifest with zero model calls.
+      - name: /goal gate ladder (deterministic spine)
+        run: node goal.mjs --gates-only
+      - name: Upload run manifests
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: goal-run-manifests
+          path: reviews/goal-*/manifest-*.json
+          if-no-files-found: ignore

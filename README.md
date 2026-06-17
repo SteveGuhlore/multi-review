@@ -1,9 +1,42 @@
-# multi-review
+# multi-review + /goal
 
 Autonomous, multi-model code review + fix loop. **Claude + GPT (Codex) + Gemini** debate findings
 round-after-round, auto-fix the validated **non-security** ones (validation-gated, revertible, branch-only),
 and write an Opus remediation **PLAN** for anything critical or security. Language-agnostic. Zero-config
 (it auto-detects the repo's language, test command, and a safe protected-paths list on first run).
+
+## `/goal` — the one-stop build↔review loop
+
+`/goal` takes an idea (small update or large build) all the way through:
+
+```
+PLAN (/helpmecode) → BUILD → GATE LADDER → REVIEW (multi-review) → ROUTE → run-manifest
+        └──────────────── re-plan / re-build until converge or caps ───────────────┘
+```
+
+- **`/helpmecode`** (skill) turns a rough idea into a build-ready `PLAN.md` + a seeded
+  `.multi-review.json` + `DESIGN.md` (adaptive interview → research-with-a-fresh-context-validator →
+  Mermaid design). It *pre-arms* the reviewer — the thing no other planner does.
+- **Autonomy dial:** `--checkpoints` (pause for sign-off; big builds) or `--auto` (unattended to
+  convergence/caps; small updates). Never auto-merges to `main`; terminal state is a green PR.
+- **Fail-closed security perimeter:** findings on protected paths or `critical` severity are
+  quarantined for heightened review, never plainly auto-fixed. Ambiguity counts as inside.
+- **Degradable gate ladder** (`.goal.json`): mutation, diff-coverage, secrets, SAST, dep-vuln,
+  malicious-package, a11y, perf… Each reduces to an exit code; a required gate whose tool is absent
+  **fails closed**; control-plane gates (deploy) never run autonomously. See `.goal.example.json`.
+- **Run-manifest** per iteration binds each change to its model, prompt hash, gate exit codes, and
+  spec version — the living-docs↔provenance bridge.
+
+```sh
+node ~/.claude/multi-review/goal.mjs "<goal>" --checkpoints     # large build (gated)
+node ~/.claude/multi-review/goal.mjs "<goal>" --auto --apply    # small update (unattended, on a branch)
+node ~/.claude/multi-review/goal.mjs --gates-only               # CI: deterministic gates only, no model calls
+node ~/.claude/multi-review/goal.mjs "<goal>" --dry-run         # watch the machine turn without model calls
+```
+
+The design rationale, ecosystem research, and build-vs-borrow decisions live in
+[`docs/ROADMAP.md`](docs/ROADMAP.md) and [`docs/RESEARCH.md`](docs/RESEARCH.md). The pure core
+(`lib/core.mjs`) is covered by `npm test` (run `node --test`), so the repo is self-validating.
 
 ## Install
 ```powershell
@@ -12,9 +45,11 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1   # Windows
 ```sh
 sh ./install.sh                                            # macOS / Linux
 ```
-Installs the `/multi-review` slash command + `loop.mjs` into `~/.claude/`.
+Installs the `/multi-review` + `/goal` slash commands, the `helpmecode` skill, and the engines
+(`loop.mjs`, `goal.mjs`, `lib/core.mjs`) into `~/.claude/`.
 
 Prereqs (authed): `claude`, `codex`, and (optional) `gemini` CLIs. The loop uses whichever are present.
+`/goal --gates-only` and `--dry-run` need none of them.
 
 ## Use — any repo, no setup
 ```sh

@@ -1,12 +1,26 @@
 #!/usr/bin/env sh
-# Install multi-review into ~/.claude (macOS / Linux).
+# Install multi-review + /goal into ~/.claude (macOS / Linux).
 set -e
 SRC="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE="$HOME/.claude"
-mkdir -p "$CLAUDE/commands" "$CLAUDE/multi-review"
+mkdir -p "$CLAUDE/commands" "$CLAUDE/multi-review/lib" "$CLAUDE/skills"
+
+# Commands
 cp "$SRC/commands/multi-review.md" "$CLAUDE/commands/multi-review.md"
+cp "$SRC/commands/goal.md" "$CLAUDE/commands/goal.md"
+
+# Engines + shared core (goal.mjs imports ./lib/core.mjs, so lib/ must travel with it)
 cp "$SRC/loop.mjs" "$CLAUDE/multi-review/loop.mjs"
+cp "$SRC/goal.mjs" "$CLAUDE/multi-review/goal.mjs"
+cp "$SRC/lib/core.mjs" "$CLAUDE/multi-review/lib/core.mjs"
+cp "$SRC/.goal.example.json" "$CLAUDE/multi-review/.goal.example.json"
 cp "$SRC/bin/codex-review.ps1" "$CLAUDE/multi-review/" 2>/dev/null || true
 cp "$SRC/bin/gemini-review.ps1" "$CLAUDE/multi-review/" 2>/dev/null || true
-echo "✓ multi-review installed → $CLAUDE"
-echo "  command: /multi-review   ·   loop: node ~/.claude/multi-review/loop.mjs --target . --apply"
+
+# Skills (recursive)
+cp -R "$SRC/skills/helpmecode" "$CLAUDE/skills/helpmecode"
+
+echo "✓ multi-review + /goal installed → $CLAUDE"
+echo "  commands: /goal  ·  /multi-review        skill: helpmecode"
+echo "  loop:  node ~/.claude/multi-review/loop.mjs --target . --apply"
+echo "  goal:  node ~/.claude/multi-review/goal.mjs \"<goal>\" --auto   (or --gates-only for CI)"

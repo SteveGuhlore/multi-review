@@ -1,0 +1,21 @@
+{
+  "_comment": "Copy to .goal.json to activate. Every gate is OPTIONAL and degradable: if its tool is absent, a required gate fails closed (blocks) and an optional one (required:false) is skipped. controlPlane gates NEVER run autonomously. This ladder turns the round-2 research into concrete, runnable slots — see docs/RESEARCH.md.",
+  "securityMode": "propose-isolated",
+  "gates": [
+    { "name": "diff-coverage",    "cmd": "diff-cover coverage.xml --compare-branch=origin/main --fail-under=90", "required": true,  "_why": "fail unless changed lines are covered (kills 'added code, no tests')" },
+    { "name": "mutation",         "cmd": "npx stryker run --incremental",                                           "required": true,  "_why": "keystone: tests that survive injected faults are theater" },
+    { "name": "property",         "cmd": "npm run test:property",                                                   "required": false, "_why": "property-based / fuzz; shrunk counterexample feeds the next iteration" },
+    { "name": "secrets",          "cmd": "gitleaks detect --no-banner --redact --exit-code 1",                      "required": true,  "_why": "hard secret block (perimeter)" },
+    { "name": "sast",             "cmd": "semgrep ci --config p/security-audit --config p/owasp-top-ten --error",   "required": true,  "_why": "semantic SAST; CLI not MCP for a deterministic exit code" },
+    { "name": "deps-vuln",        "cmd": "osv-scanner --recursive --format sarif .",                                "required": true,  "_why": "SCA over lockfiles" },
+    { "name": "deps-malware",     "cmd": "guarddog pypi scan-local .",                                              "required": true,  "_why": "pre-install malicious-package screen (typosquat/install-hooks) — the blind spot" },
+    { "name": "license-policy",   "cmd": "scancode --license --json-pp - . | node scripts/deny-copyleft.mjs",       "required": false, "_why": "block GPL/AGPL/SSPL creep (AGPL triggers on network use)" },
+    { "name": "dead-code",        "cmd": "npx knip --reporter json",                                                "required": false, "_why": "self-refilling tech-debt backlog the loop burns down" },
+    { "name": "a11y",             "cmd": "npx playwright test a11y.spec.ts",                                        "required": false, "_why": "axe-core via Playwright; block on critical/serious (baseline-ratchet)" },
+    { "name": "visual-regression","cmd": "npx playwright test --grep @visual",                                      "required": false, "_why": "unintended UI change (distinct from anti-slop aesthetics)" },
+    { "name": "perf-regression",  "cmd": "node bench/run.mjs --fail-on-alert --threshold 10",                       "required": false, "_why": "benchmark delta vs baseline; noise floor matters" },
+    { "name": "loop-eval",        "cmd": "promptfoo eval --no-cache",                                               "required": false, "_why": "regression-test the prompts/skills themselves on a golden set" },
+
+    { "name": "deploy-canary",    "cmd": "argo rollouts status myapp --watch=false",                               "required": true,  "controlPlane": true, "_why": "CONTROL-PLANE: never autonomous; deterministic SLO-gated rollback owns prod" }
+  ]
+}
