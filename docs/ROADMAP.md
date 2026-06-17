@@ -95,6 +95,65 @@ bloat and bad taste.
    of truth so taste is versioned, extensible, and not hostage to an upstream skill. This is
    the "build my own" layer — synthesis, like design-taste, but ours.
 
+## Safe autonomy — the security gate and "works by itself"
+
+Goal: a fully automated loop that runs unattended, efficiently, on small updates *and* massive
+builds. "Mandatory security gate that can never be auto-bypassed" and "fully automated" are
+compatible once the gate is **fail-closed and one-directional**: it can autonomously
+**block/quarantine**, never autonomously **approve**.
+
+Separate the two things people conflate:
+
+- **Autonomous detection + routing** — the gate runs with no human to trigger it. Fully automatable.
+- **Autonomous approval of perimeter-crossing code** — the loop decides on its own to ship
+  something security-sensitive. Never. A human (or a stricter policy) signs that off.
+
+The model that makes unattended runs safe:
+
+1. **Perimeter, fail-closed.** `protectedPaths` / `protectedSymbols` (already in
+   `.multi-review.json`) define a security perimeter. Changes *outside* it that pass
+   review + tests + slop gates ship autonomously. Changes *inside* it are quarantined to a
+   branch/`PLAN.md`. **Ambiguity counts as inside.** The loop runs unattended on the majority
+   and only ever pauses at a perimeter crossing (optionally *quarantine-and-continue* on the
+   rest, so it never fully stalls).
+2. **Autonomy ≠ auto-merge.** The loop builds, reviews, and self-corrects autonomously *on a
+   branch*; it never merges to the default branch itself (multi-review already refuses
+   `--apply` on `main`/`master`). Terminal state = a green PR, not a merge.
+3. **Circuit breakers.** Existing caps (rounds, wall-clock, oscillation guard) **plus** a
+   token/cost budget and an "N consecutive reverts / validation failures → stop + write PLAN"
+   breaker, so a confused loop halts instead of thrashing.
+4. **Sandbox + secret-scan + provenance** on every unattended write — ephemeral worktrees,
+   read-only external models, secret-scrub before commit, full audit trail (multi-review has
+   these; the loop inherits them) so any autonomous run is reconstructable.
+
+Net: full automation is safe for everything *outside* the perimeter; the perimeter is the one
+place that needs a human or a hard policy — and even that can be configured to keep working on
+the rest rather than block.
+
+## Subagents — context isolation, parallelism, separation of duties
+
+Subagents are load-bearing in this design. Use them for:
+
+- **Research fan-out** — `Explore` / `scout` / `deep-research` (already subagents).
+- **Fresh-context validator** — the hallucination-killer requires a subagent that cannot see
+  the generator's reasoning.
+- **Separation of duties** — the subagent that *writes* code must not be the one that
+  *approves* it; the reviewer-as-subagent feeds gaps straight back to the implementer. This is
+  what prevents "grading your own homework."
+- **Parallel reviews + each anti-slop gate** — each in its own focused context.
+
+Two hard rules so subagents stay safe under autonomy:
+
+- The **orchestrator** (deterministic loop code) owns loop state — caps, routing, provenance,
+  and **the security decision**. Subagents *detect and recommend*; they never *decide* a
+  perimeter crossing or *approve* security work.
+- Subagents reviewing repo content process **untrusted data** — keep the untrusted-data
+  framing inside them, and budget their token cost (don't spawn one for trivial steps).
+
+The existing `loop.mjs` already shells out to separate `claude` / `codex` / `gemini` CLI
+processes — process-level isolation that is the out-of-harness equivalent of subagents. In-harness
+skill orchestration uses the `Agent` tool for the same separation.
+
 ## Integration contract with `multi-review`
 
 The planner must pre-arm the reviewer. PLAN phase emits:
