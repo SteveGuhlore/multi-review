@@ -23,7 +23,7 @@ import { runSummary, classifyCommit, aggregate } from "./lib/metrics.mjs";
 import {
   autodetectConfig, isProtected, routeFinding, gateVerdict, isControlPlane,
   buildManifest, parseAutonomy, TerminationGuard, fingerprintFindings, netValidated,
-  findSecrets, manifestSha, pickLatestRoundFile, verifyChain,
+  findSecrets, findCodeSlop, manifestSha, pickLatestRoundFile, verifyChain,
 } from "./lib/core.mjs";
 
 // ---- args ------------------------------------------------------------------
@@ -89,7 +89,10 @@ function detectModels() {
 function buildGateLadder(cfg) {
   // Always-on, zero-dependency perimeter gate first, then the validation matrix, then the
   // optional configured ladder. Opt out with "secretScan": false in config.
-  const builtin = cfg.secretScan === false ? [] : [{ name: "secrets (builtin)", builtin: "secrets", required: true }];
+  const builtin = [
+    ...(cfg.secretScan === false ? [] : [{ name: "secrets (builtin)", builtin: "secrets", required: true }]),
+    ...(cfg.codeSlopScan === false ? [] : [{ name: "code-slop (builtin)", builtin: "codeslop", required: true }]),
+  ];
   const fromValidation = (cfg.validation?.default || []).map((cmd) => ({ name: cmd.length <= 24 ? cmd : cmd.split(" ")[0], cmd, required: true }));
   return [...builtin, ...fromValidation, ...(cfg.gates || [])];
 }
@@ -101,17 +104,21 @@ function trackedFiles() {
   const r = spawnSync("git", ["ls-files"], { shell: true, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   return (r.stdout || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean).filter((f) => !f.startsWith("reviews/"));
 }
-function builtinSecrets() {
+// Scan every tracked file with `detect(body)`; log up to 10 hits; pass iff none.
+function builtinScan(label, detect, fmt) {
   const hits = [];
   for (const f of trackedFiles()) {
     let body;
     try { body = readFileSync(join(ROOT, f), "utf8"); } catch { continue; }
-    for (const h of findSecrets(body)) hits.push({ ...h, file: f });
+    for (const h of detect(body)) hits.push({ ...h, file: f });
   }
-  if (hits.length) for (const h of hits.slice(0, 10)) log(`      ${C.r}secret${C.x} ${h.file}:${h.line} ${C.dim}${h.type} ${h.match}${C.x}`);
+  for (const h of hits.slice(0, 10)) log(`      ${C.r}${label}${C.x} ${h.file}:${h.line} ${C.dim}${fmt(h)}${C.x}`);
   return hits.length === 0;
 }
-const BUILTINS = { secrets: builtinSecrets };
+const BUILTINS = {
+  secrets: () => builtinScan("secret", findSecrets, (h) => `${h.type} ${h.match}`),
+  codeslop: () => builtinScan("code-slop", findCodeSlop, (h) => h.type),
+};
 
 function runGate(gate) {
   if (isControlPlane(gate)) return { name: gate.name, pass: null, skipped: true, reason: "control-plane (never autonomous)", required: gate.required };

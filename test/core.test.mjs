@@ -5,7 +5,7 @@ import {
   normPath, globToRegExp, isProtected, findingSig, mergeFindings, netValidated,
   sevRank, routeFinding, extractArr, extractObj, TerminationGuard, fingerprintFindings,
   isControlPlane, gateVerdict, buildManifest, sha256, parseAutonomy, autodetectConfig,
-  findSecrets, manifestSha, verifyChain, pickLatestRoundFile,
+  findSecrets, findCodeSlop, manifestSha, verifyChain, pickLatestRoundFile,
 } from "../lib/core.mjs";
 
 test("normPath converts backslashes to forward slashes", () => {
@@ -213,6 +213,16 @@ test("findSecrets detects well-known credential formats and redacts them", () =>
 test("findSecrets honors the allowlist pragma", () => {
   const text = 'const k = "AKIA' + 'IOSFODNN7EXAMPLE";  // goal:allow-secret';
   assert.deepEqual(findSecrets(text), []);
+});
+
+test("findCodeSlop flags conflict markers and leftover debugger, honors pragma", () => {
+  const conflict = "<".repeat(7) + " HEAD";
+  assert.equal(findCodeSlop(conflict)[0].type, "merge-conflict-marker");
+  assert.equal(findCodeSlop("  debugger;  ")[0].type, "leftover-debugger"); // goal:allow-secret
+  assert.deepEqual(findCodeSlop("const x = 1; // ordinary code"), []);
+  assert.deepEqual(findCodeSlop("debugger; // goal:allow-secret"), [], "pragma suppresses");
+  // A '<<<<<<<' inside prose without the trailing space is not a marker.
+  assert.deepEqual(findCodeSlop("a" + "<".repeat(7) + "b"), []);
 });
 
 test("findSecrets is quiet on clean code and bad input", () => {
