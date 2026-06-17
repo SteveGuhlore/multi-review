@@ -257,8 +257,29 @@ function reportMetrics() {
   log(`${C.dim}wrote METRICS.md${C.x}`);
 }
 
+const HELP = `/goal — one-stop autonomous build↔review loop
+
+Usage:
+  node goal.mjs "<goal>" [options]
+
+Options:
+  --auto | --checkpoints   autonomy dial (default: checkpoints)
+  --apply                  auto-fix validated non-perimeter findings (branch-only)
+  --plan-only              plan + gates only (no build/review)
+  --gates-only             deterministic spine only (gate ladder + manifest); no model calls — ideal for CI
+  --dry-run                describe model phases; run the real deterministic spine
+  --metrics                report bug-escape + slop-rate trend (writes METRICS.md) and exit
+  --target <path>          scope (default: .)
+  --rounds N               outer iteration cap (default: 6)
+  --minutes N              wall-clock cap (default: 180)
+  --help                   this message
+
+Safety: never --apply on main/master; never auto-merges; security perimeter is fail-closed;
+control-plane gates never run autonomously. Artifacts: reviews/goal-<ts>/.`;
+
 // ---- main loop -------------------------------------------------------------
 function main() {
+  if (flag("--help") || flag("-h")) { console.log(HELP); return; }
   if (flag("--metrics")) { reportMetrics(); return; }
   mkdirSync(RUN_DIR, { recursive: true });
   const cfg = loadConfig();

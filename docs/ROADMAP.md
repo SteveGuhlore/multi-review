@@ -18,6 +18,30 @@ The unfair advantage over existing planners (spec-kit, superpowers, prd-generato
 this loop **closes back into a multi-model review system** (`multi-review`, already built) and
 enforces **taste/anti-slop**, not just correctness. No public tool does both.
 
+## Implementation status (what's built so far)
+
+The deterministic spine is implemented and tested (41 tests, `npm test`); model-dependent phases
+(PLAN/BUILD/REVIEW) are wired to dispatch to the CLIs / `loop.mjs` and are observable under
+`--dry-run`. Honest split — **runs for real here:** config, the gate ladder, finding routing,
+provenance, termination, the built-in secret + license gates, metrics. **Needs the model CLIs
+(can't be verified in this sandbox):** the actual planner interview, code generation, and the
+multi-model review debate.
+
+| Area | State | Where |
+|---|---|---|
+| Tested pure core (perimeter, routing, termination, gate verdict, secrets, provenance, metrics) | ✅ built | `lib/core.mjs`, `lib/metrics.mjs`, `test/*` |
+| `/goal` orchestrator (autonomy dial, fail-closed perimeter, dry-run/gates-only) | ✅ built | `goal.mjs`, `commands/goal.md` |
+| `/helpmecode` planner skill (interview → research+validator → design → handoff) | ✅ built | `skills/helpmecode/` |
+| Degradable gate ladder + data-plane/control-plane split | ✅ built | `goal.mjs`, `.goal.example.json` |
+| Built-in secret-scan gate (zero-dep) + license-policy gate | ✅ built | `lib/core.mjs`, `scripts/deny-copyleft.mjs` |
+| Hash-chained, tamper-evident run-manifests | ✅ built | `lib/core.mjs` (`verifyChain`) |
+| Self-eval metrics (bug-escape + slop rate; keep-a-rewrite rule) | ✅ measurement half | `lib/metrics.mjs`, `goal.mjs --metrics` |
+| `loop.mjs` deduped onto the shared core | ✅ done | `loop.mjs` |
+| Self-validating CI (npm test + `goal --gates-only`) | ✅ built | `.github/workflows/ci.yml` |
+| External gates (mutation/SAST/dep-vuln/a11y/perf) | ⛓ integrated via config (run if installed) | `.goal.example.json` |
+| Mutation-guided test synthesis; impact-scoped edits; full self-rewrite loop | ◻ designed, not built | this doc |
+| Actual PLAN/BUILD/REVIEW model calls | ⛓ dispatched, unverified in sandbox | `goal.mjs` |
+
 ## What already exists (build on, don't rebuild)
 
 - `/multi-review` slash command + `loop.mjs` — Claude + Codex + Gemini review → debate to
