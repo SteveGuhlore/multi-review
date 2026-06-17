@@ -1,0 +1,40 @@
+{
+  "extensions": [
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".vue",
+    ".svelte"
+  ],
+  "protectedPaths": [
+    ".env*",
+    "**/.env*",
+    "**/*secret*",
+    "**/*credential*",
+    "**/*apikey*",
+    "**/*api_key*",
+    "**/*password*",
+    "**/*token*",
+    "**/*key*",
+    "**/*private*",
+    "**/auth/**",
+    "**/*auth*",
+    "**/security/**",
+    "**/migrations/**",
+    "**/*payment*",
+    "**/*billing*",
+    "**/*execut*",
+    "**/*trade*",
+    "**/CODEOWNERS"
+  ],
+  "validation": {
+    "default": [
+      "npm test"
+    ]
+  },
+  "gates": [],
+  "securityMode": "propose-isolated"
+}

@@ -135,6 +135,15 @@ test("gateVerdict fails closed: any required non-pass blocks; unknown == fail", 
   assert.equal(gateVerdict([{ name: "opt", pass: false, required: false }]).pass, true);
 });
 
+test("gateVerdict: skipped gates never block (control-plane deferred, optional-absent)", () => {
+  // Control-plane gate is required but skipped — deferred to human/controller, must not block.
+  assert.equal(gateVerdict([{ name: "deploy", required: true, skipped: true, pass: null }]).pass, true);
+  // Optional gate whose tool is absent is skipped — must not block.
+  assert.equal(gateVerdict([{ name: "a11y", required: false, skipped: true, pass: null }]).pass, true);
+  // But a required gate whose tool is absent is pass:false (NOT skipped) — still fails closed.
+  assert.equal(gateVerdict([{ name: "sast", required: true, pass: false }]).pass, false);
+});
+
 test("buildManifest binds change to model, prompt hash, gates", () => {
   const m = buildManifest({
     model: "opus", promptText: "review this", filesTouched: ["a.ts"],
