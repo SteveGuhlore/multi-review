@@ -336,6 +336,7 @@ function main() {
   }
 
   let iteration = 0, stopReason = "converged";
+  let lastGates = [], lastVerdict = { pass: true, failures: [] }, lastBuckets = { auto: [], quarantine: [], plan: [] };
   while (true) {
     iteration++;
     log(`\n${C.b}══ iteration ${iteration} ══${C.x}`);
@@ -351,8 +352,9 @@ function main() {
     guard.recordFix(verdict.pass);
 
     const review = (PLAN_ONLY || GATES_ONLY) ? { findings: [] } : phaseReview(cfg, models);
-    routeAndReport(cfg, review.findings, iteration);
+    const buckets = routeAndReport(cfg, review.findings, iteration);
     writeManifest(cfg, models, gateResults, iteration);
+    lastGates = gateResults; lastVerdict = verdict; lastBuckets = buckets;
 
     if (GATES_ONLY) { stopReason = verdict.pass ? "gates green" : "gates blocked"; break; }
     if (PLAN_ONLY) { stopReason = "plan-only"; break; }
@@ -364,9 +366,33 @@ function main() {
     if (AUTONOMY === "checkpoints") { stopReason = "checkpoint (awaiting human)"; break; }
   }
 
+  writeSummary({ cfg, models, stopReason, iteration, gates: lastGates, verdict: lastVerdict, buckets: lastBuckets });
   log(`\n${C.b}■ done${C.x}  ${C.dim}stop:${C.x} ${stopReason}   ${C.dim}iterations:${C.x} ${iteration}`);
-  log(`${C.dim}artifacts:${C.x} ${RUN_DIR}/ (log.md, manifest-*.json${existsSync(join(RUN_DIR, "PLAN.md")) ? ", PLAN.md" : ""})`);
+  log(`${C.dim}artifacts:${C.x} ${RUN_DIR}/ (SUMMARY.md, log.md, manifest-*.json${existsSync(join(RUN_DIR, "PLAN.md")) ? ", PLAN.md" : ""})`);
   flushLog();
+}
+
+// Human-readable run report: the deliverable a reviewer reads first.
+function writeSummary({ cfg, models, stopReason, iteration, gates, verdict, buckets }) {
+  const mark = (r) => r.skipped ? "skip" : r.dry ? "dry" : r.pass ? "pass" : "FAIL";
+  const lines = [
+    `# /goal run summary`,
+    ``,
+    `- **goal:** ${GOAL || "(review/maintain mode)"}`,
+    `- **stop:** ${stopReason} · **iterations:** ${iteration} · **mode:** ${DRY ? "dry-run" : APPLY ? "apply" : "report"}`,
+    `- **autonomy:** ${AUTONOMY} · **security:** ${cfg.securityMode} · **models:** ${models.join(", ") || "none"}`,
+    `- **gate verdict:** ${verdict.pass ? "GREEN" : "BLOCKED (" + verdict.failures.join(", ") + ")"}`,
+    `- **provenance:** manifest chain head \`${PREV_MANIFEST_SHA || "n/a"}\` (verify: \`goal --verify\`)`,
+    ``,
+    `## Gates`,
+    ...gates.map((g) => `- ${mark(g)} — ${g.name}${g.reason ? ` (${g.reason})` : ""}`),
+    ``,
+    `## Routed findings`,
+    `- auto-fixable (outside perimeter): ${buckets.auto.length}`,
+    `- quarantined (perimeter, isolated review): ${buckets.quarantine.length}`,
+    `- plan (critical / never auto): ${buckets.plan.length}`,
+  ];
+  writeFileSync(join(RUN_DIR, "SUMMARY.md"), lines.join("\n") + "\n");
 }
 
 main();
