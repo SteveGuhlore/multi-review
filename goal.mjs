@@ -23,7 +23,7 @@ import { runSummary, classifyCommit, aggregate } from "./lib/metrics.mjs";
 import {
   autodetectConfig, isProtected, routeFinding, gateVerdict, isControlPlane,
   buildManifest, parseAutonomy, TerminationGuard, fingerprintFindings, netValidated,
-  findSecrets,
+  findSecrets, manifestSha,
 } from "./lib/core.mjs";
 
 // ---- args ------------------------------------------------------------------
@@ -210,6 +210,7 @@ function routeAndReport(cfg, findings, iteration) {
   return buckets;
 }
 
+let PREV_MANIFEST_SHA = null;
 function writeManifest(cfg, models, gateResults, iteration) {
   const manifest = buildManifest({
     model: models[0] || (DRY ? "dry-run" : null),
@@ -219,8 +220,10 @@ function writeManifest(cfg, models, gateResults, iteration) {
     gates: gateResults,
     specVersion: existsSync("PLAN.md") ? "PLAN.md" : null,
     iteration,
+    prev: PREV_MANIFEST_SHA, // hash-chain: each manifest references the previous one
   });
   writeFileSync(join(RUN_DIR, `manifest-${iteration}.json`), JSON.stringify(manifest, null, 2));
+  PREV_MANIFEST_SHA = manifestSha(manifest);
   return manifest;
 }
 

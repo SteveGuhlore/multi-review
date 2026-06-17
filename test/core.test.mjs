@@ -5,7 +5,7 @@ import {
   normPath, globToRegExp, isProtected, findingSig, mergeFindings, netValidated,
   sevRank, routeFinding, extractArr, extractObj, TerminationGuard, fingerprintFindings,
   isControlPlane, gateVerdict, buildManifest, sha256, parseAutonomy, autodetectConfig,
-  findSecrets,
+  findSecrets, manifestSha, verifyChain,
 } from "../lib/core.mjs";
 
 test("normPath converts backslashes to forward slashes", () => {
@@ -155,6 +155,17 @@ test("buildManifest binds change to model, prompt hash, gates", () => {
   assert.equal(m.model, "opus");
   assert.equal(m.iteration, 2);
   assert.deepEqual(m.gates, [{ name: "tests", pass: true, exitCode: 0 }]);
+});
+
+test("manifest chain: prev links each manifest; verifyChain detects tampering", () => {
+  const m1 = buildManifest({ model: "opus", iteration: 1, ts: "t1" });
+  const m2 = buildManifest({ model: "opus", iteration: 2, ts: "t2", prev: manifestSha(m1) });
+  const m3 = buildManifest({ model: "opus", iteration: 3, ts: "t3", prev: manifestSha(m2) });
+  assert.deepEqual(verifyChain([m1, m2, m3]), { ok: true, brokenAt: -1 });
+  // Tamper with m2 after the fact → chain breaks at index 2 (m3.prev no longer matches).
+  m2.gitSha = "tampered";
+  assert.deepEqual(verifyChain([m1, m2, m3]), { ok: false, brokenAt: 2 });
+  assert.deepEqual(verifyChain([m1]), { ok: true, brokenAt: -1 });
 });
 
 test("parseAutonomy defaults to checkpoints; flags override", () => {
