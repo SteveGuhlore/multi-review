@@ -105,30 +105,55 @@ compatible once the gate is **fail-closed and one-directional**: it can autonomo
 Separate the two things people conflate:
 
 - **Autonomous detection + routing** — the gate runs with no human to trigger it. Fully automatable.
-- **Autonomous approval of perimeter-crossing code** — the loop decides on its own to ship
-  something security-sensitive. Never. A human (or a stricter policy) signs that off.
+- **Autonomous *trust* of perimeter-crossing code** — the loop silently treats a security edit
+  like any other auto-fixed change. Never. Security edits are always segregated and surfaced.
+
+Note the real failure mode the perimeter guards against is **not** "it merges automatically"
+(it never does — see auto-merge below). It is: an autonomous model produces a security fix that
+is *confident, plausible, and passes every test* but is subtly wrong (tests are weak at catching
+security regressions), it gets buried in a large diff, and **review fatigue** rubber-stamps it.
+The defense is segregation + heightened review, not "don't touch it."
+
+So findings route into **three** buckets, not two:
+
+| Bucket | Auto-fix? | Trust / review |
+|---|---|---|
+| Outside perimeter | yes | light — ships in the main auto-fixed commits |
+| Inside perimeter | yes (attempt) | **quarantined**: own isolated commits / PR section, mandatory heightened per-item review, "tests green" is **not** sufficient signal |
+| Truly ambiguous / can't validate | no | `PLAN.md` remediation writeup |
+
+This is a config knob — `securityFindings: propose-isolated | plan-only` — defaulting to
+**`propose-isolated`** (auto-fix attempted but quarantined). `plan-only` is the conservative
+opt-in. Either way, perimeter edits never get the same low-friction trust as ordinary edits and
+never auto-merge.
 
 The model that makes unattended runs safe:
 
 1. **Perimeter, fail-closed.** `protectedPaths` / `protectedSymbols` (already in
-   `.multi-review.json`) define a security perimeter. Changes *outside* it that pass
-   review + tests + slop gates ship autonomously. Changes *inside* it are quarantined to a
-   branch/`PLAN.md`. **Ambiguity counts as inside.** The loop runs unattended on the majority
-   and only ever pauses at a perimeter crossing (optionally *quarantine-and-continue* on the
-   rest, so it never fully stalls).
+   `.multi-review.json`) define a security perimeter. **Ambiguity counts as inside.** Outside →
+   trusted/light; inside → quarantined per the table above.
 2. **Autonomy ≠ auto-merge.** The loop builds, reviews, and self-corrects autonomously *on a
    branch*; it never merges to the default branch itself (multi-review already refuses
    `--apply` on `main`/`master`). Terminal state = a green PR, not a merge.
-3. **Circuit breakers.** Existing caps (rounds, wall-clock, oscillation guard) **plus** a
-   token/cost budget and an "N consecutive reverts / validation failures → stop + write PLAN"
-   breaker, so a confused loop halts instead of thrashing.
-4. **Sandbox + secret-scan + provenance** on every unattended write — ephemeral worktrees,
+3. **Never block-and-wait, but always terminate.** The loop must never stall waiting on a human
+   mid-run: a perimeter crossing is bucketed and the loop **quarantines-and-continues** on the
+   rest, finishing by opening a PR with the auto-applied work *plus* the flagged security bucket.
+   "Never halts" = never *blocks waiting*, not "runs forever" — it still terminates cleanly at
+   convergence or the caps (rounds / wall-clock / cost / consecutive-failure breaker).
+4. **"Stricter policy" sign-off (replacing the human, additively).** A perimeter fix's human
+   approval may be replaced by a **machine policy that is stricter than what governs ordinary
+   changes** — more gates, not fewer. A perimeter fix is allowed into the reviewed branch only
+   if *all* hold: unanimous multi-model consensus (not just ≥2) · a security scanner passes
+   (e.g. `semgrep`, `gitleaks`/secret-scan — deterministic, fatigue-proof) · no unsatisfied
+   `CODEOWNERS` security rule · a dedicated `security-review` subagent returns a clean verdict
+   in fresh context. This is additive safety, the opposite of bypassing the gate.
+5. **Sandbox + secret-scan + provenance** on every unattended write — ephemeral worktrees,
    read-only external models, secret-scrub before commit, full audit trail (multi-review has
    these; the loop inherits them) so any autonomous run is reconstructable.
 
-Net: full automation is safe for everything *outside* the perimeter; the perimeter is the one
-place that needs a human or a hard policy — and even that can be configured to keep working on
-the rest rather than block.
+Net: full automation runs end-to-end without ever blocking on a human; the perimeter is not a
+stop sign but a **segregation + heightened-scrutiny lane**, and the only thing that never
+happens autonomously is an unreviewed merge to the default branch.
 
 ## Subagents — context isolation, parallelism, separation of duties
 
