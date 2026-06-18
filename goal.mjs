@@ -17,6 +17,7 @@
 // material remains — not a proof of correctness.
 
 import { spawnSync } from "node:child_process";
+import { writeDashboard } from "./dashboard.mjs";
 import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { runSummary, classifyCommit, aggregate } from "./lib/metrics.mjs";
@@ -372,6 +373,7 @@ function main() {
   }
 
   writeSummary({ cfg, models, stopReason, iteration, gates: lastGates, verdict: lastVerdict, buckets: lastBuckets });
+  try { writeDashboard("reviews"); log("    📊 dashboard -> reviews/dashboard.html"); } catch { /* cosmetic: never fail a run over the dashboard */ }
   log(`\n${C.b}■ done${C.x}  ${C.dim}stop:${C.x} ${stopReason}   ${C.dim}iterations:${C.x} ${iteration}`);
   log(`${C.dim}artifacts:${C.x} ${RUN_DIR}/ (SUMMARY.md, log.md, manifest-*.json${existsSync(join(RUN_DIR, "PLAN.md")) ? ", PLAN.md" : ""})`);
   flushLog();

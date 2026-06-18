@@ -14,6 +14,7 @@ Copy-Item (Join-Path $src "commands\goal.md") (Join-Path $claude "commands\goal.
 # Engines + shared lib (goal.mjs imports ./lib/{core,metrics}.mjs, so all of lib/ must travel with it)
 Copy-Item (Join-Path $src "loop.mjs") (Join-Path $claude "multi-review\loop.mjs") -Force
 Copy-Item (Join-Path $src "goal.mjs") (Join-Path $claude "multi-review\goal.mjs") -Force
+Copy-Item (Join-Path $src "dashboard.mjs") (Join-Path $claude "multi-review\dashboard.mjs") -Force
 Copy-Item (Join-Path $src "lib\*.mjs") (Join-Path $claude "multi-review\lib\") -Force
 Copy-Item (Join-Path $src ".goal.example.json") (Join-Path $claude "multi-review\.goal.example.json") -Force
 Copy-Item (Join-Path $src "codex-review.ps1") (Join-Path $claude "multi-review\codex-review.ps1") -Force

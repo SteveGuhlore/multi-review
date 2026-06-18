@@ -20,6 +20,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync, statSy
 import { join, sep } from "node:path";
 // Shared, unit-tested core (single source of truth for the risky logic — see test/core.test.mjs).
 import { isProtected as coreIsProtected, extractArr, extractObj, findingSig as sig } from "./lib/core.mjs";
+import { writeDashboard } from "./dashboard.mjs";
 
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf(k); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -275,6 +276,7 @@ function main() {
     if (!applied) { log(`\n⊘ No fix held validation — remaining go to PLAN.`); break; }
   }
   writePlan([...planMap.values()]);
+  try { writeDashboard("reviews"); log("  📊 dashboard -> reviews/dashboard.html"); } catch { /* cosmetic: never fail a run over the dashboard */ }
   log(`\nDone. Artifacts in ${RUN_DIR}/ (log.md, round-*.json, PLAN.md)`);
 }
 main();

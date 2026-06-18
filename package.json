@@ -5,7 +5,8 @@
   "type": "module",
   "bin": {
     "multi-review": "loop.mjs",
-    "goal": "goal.mjs"
+    "goal": "goal.mjs",
+    "mr-dashboard": "dashboard.mjs"
   },
   "scripts": {
     "test": "node --test",
