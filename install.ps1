@@ -16,8 +16,8 @@ Copy-Item (Join-Path $src "loop.mjs") (Join-Path $claude "multi-review\loop.mjs"
 Copy-Item (Join-Path $src "goal.mjs") (Join-Path $claude "multi-review\goal.mjs") -Force
 Copy-Item (Join-Path $src "lib\*.mjs") (Join-Path $claude "multi-review\lib\") -Force
 Copy-Item (Join-Path $src ".goal.example.json") (Join-Path $claude "multi-review\.goal.example.json") -Force
-Copy-Item (Join-Path $src "bin\codex-review.ps1") (Join-Path $claude "multi-review\codex-review.ps1") -Force
-Copy-Item (Join-Path $src "bin\gemini-review.ps1") (Join-Path $claude "multi-review\gemini-review.ps1") -Force
+Copy-Item (Join-Path $src "codex-review.ps1") (Join-Path $claude "multi-review\codex-review.ps1") -Force
+Copy-Item (Join-Path $src "gemini-review.ps1") (Join-Path $claude "multi-review\gemini-review.ps1") -Force
 
 # Skill (recursive)
 Copy-Item (Join-Path $src "skills\helpmecode") (Join-Path $claude "skills\helpmecode") -Recurse -Force
