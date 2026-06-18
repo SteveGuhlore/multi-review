@@ -123,3 +123,18 @@ test("parseRunDir: findings are sorted by severity, critical first (quick-read)"
   });
   assert.deepEqual(run.findings.map((f) => f.severity), ["critical", "high", "medium", "low", "info"]);
 });
+
+test("renderHtml: severity chips are clickable filters and rows are tagged for filtering", () => {
+  const run = parseRunDir("loop-2026-06-17T23-00-00-000Z", {
+    "round-1.json": [
+      { severity: "critical", file: "auth.js", issue: "x", support: ["claude"] },
+      { severity: "low", file: "log.js", issue: "y", support: ["codex"] },
+    ],
+  });
+  const html = renderHtml(aggregate([run]));
+  assert.match(html, /class="chip"[^>]*data-sev="critical"/);
+  assert.match(html, /class="chip"[^>]*data-sev="low"/);
+  assert.match(html, /<tr data-sev="critical"/);
+  assert.match(html, /<tr data-sev="low"/);
+  assert.match(html, /function flt\(/);
+});
