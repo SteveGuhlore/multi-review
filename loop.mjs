@@ -226,7 +226,7 @@ function applyFix(f) {
     writeFileSync(msgFile, `${subject}\n\nAuto-applied by multi-review (validation-gated).\nFiles: ${touched.join(", ") || f.file}\n`);
     const c = spawnSync("git", ["commit", "-F", msgFile], { encoding: "utf8", shell: true });
     if (c.status === 0) { log(`    ✓ committed — files: ${touched.join(", ") || f.file}`); return true; }
-    log(`    ⚠ validation passed but commit failed: ${(c.stderr || "").trim().slice(0, 200)}`);
+    log(`    ⚠ validation passed but commit failed: ${[c.stdout, c.stderr].map((s) => String(s || "").trim()).filter(Boolean).join(" | ").slice(0, 300) || ("exit " + c.status)}`);
   }
   // Revert the whole attempt (tracked edits + any new files the editor created);
   // git clean respects .gitignore so reviews/ and node_modules are untouched.
