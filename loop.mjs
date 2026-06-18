@@ -149,29 +149,40 @@ function callCodex(input) { const o = join(RUN_DIR, "_codex.txt"); runCli("codex
 // Gemini via Vertex AI (direct REST) when configured: the gemini CLI's Vertex mode hangs,
 // and Vertex bills to your GCP project (drawing Cloud credit). Falls back to the gemini CLI
 // when Vertex env isn't set. Synchronous (curl) to match the rest of the loop.
-let _vertexToken;
-function vertexToken() {
-  if (_vertexToken) return _vertexToken;
+let _vertexToken, _vertexTokenAt = 0;
+function vertexToken(force) {
+  // ADC access tokens expire ~1h; on a multi-hour run we must re-mint or gemini
+  // silently 401s and is dropped. Reuse the cached token for 45m, else re-mint.
+  if (!force && _vertexToken && (Date.now() - _vertexTokenAt) < 45 * 60_000) return _vertexToken;
   const r = spawnSync("gcloud", ["auth", "application-default", "print-access-token"], { shell: true, encoding: "utf8", timeout: 60_000 });
-  _vertexToken = (r.stdout || "").trim();
-  return _vertexToken;
+  const t = (r.stdout || "").trim();
+  if (t) { _vertexToken = t; _vertexTokenAt = Date.now(); }
+  return _vertexToken || "";
 }
 function callVertex(input) {
   const proj = process.env.GOOGLE_CLOUD_PROJECT, loc = process.env.GOOGLE_CLOUD_LOCATION || "us-central1", model = process.env.MR_GEMINI_MODEL || "gemini-2.5-flash";
-  const token = vertexToken();
-  if (!token) { failed.add("gemini"); log("    ⚠ gemini (vertex): no ADC token — run `gcloud auth application-default login`. Dropped."); return ""; }
   const url = `https://${loc}-aiplatform.googleapis.com/v1/projects/${proj}/locations/${loc}/publishers/google/models/${model}:generateContent`;
   const body = JSON.stringify({ contents: [{ role: "user", parts: [{ text: input }] }] });
   const curl = process.platform === "win32" ? "curl.exe" : "curl";
-  const r = spawnSync(curl, ["-s", "-X", "POST", url, "-H", `Authorization: Bearer ${token}`, "-H", "Content-Type: application/json", "--data-binary", "@-"], { input: body, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: MODEL_TIMEOUT_MS, killSignal: "SIGKILL" });
-  if (r.error || !r.stdout) { failed.add("gemini"); log(`    ⚠ gemini (vertex) ${(r.error && (r.error.code || r.error.message)) || "no output"} — dropped for the rest of this run.`); return ""; }
-  try {
-    const j = JSON.parse(r.stdout);
-    const c = j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts;
-    const t = (c || []).map((p) => p.text || "").join("");
-    if (!t && j.error) { failed.add("gemini"); log(`    ⚠ gemini (vertex) API error: ${String(j.error.message || "").slice(0, 120)} — dropped.`); }
-    return t;
-  } catch { failed.add("gemini"); log("    ⚠ gemini (vertex) non-JSON response — dropped."); return ""; }
+  // Try twice: a 401 (expired token) on the first attempt forces a fresh token and one
+  // retry, so a mid-run token expiry doesn't permanently drop gemini from a long run.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const token = vertexToken(attempt > 0);
+    if (!token) { failed.add("gemini"); log("    ⚠ gemini (vertex): no ADC token — run `gcloud auth application-default login`. Dropped."); return ""; }
+    const r = spawnSync(curl, ["-s", "-X", "POST", url, "-H", `Authorization: Bearer ${token}`, "-H", "Content-Type: application/json", "--data-binary", "@-"], { input: body, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: MODEL_TIMEOUT_MS, killSignal: "SIGKILL" });
+    if (r.error || !r.stdout) { failed.add("gemini"); log(`    ⚠ gemini (vertex) ${(r.error && (r.error.code || r.error.message)) || "no output"} — dropped for the rest of this run.`); return ""; }
+    try {
+      const j = JSON.parse(r.stdout);
+      const c = j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts;
+      const t = (c || []).map((p) => p.text || "").join("");
+      if (!t && j.error) {
+        if (attempt === 0 && (j.error.code === 401 || String(j.error.status || "") === "UNAUTHENTICATED")) continue; // expired token → retry once with a fresh one
+        failed.add("gemini"); log(`    ⚠ gemini (vertex) API error: ${String(j.error.message || "").slice(0, 120)} — dropped.`); return "";
+      }
+      return t;
+    } catch { failed.add("gemini"); log("    ⚠ gemini (vertex) non-JSON response — dropped."); return ""; }
+  }
+  return "";
 }
 function callGemini(input) {
   if (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" && process.env.GOOGLE_CLOUD_PROJECT) return callVertex(input);
@@ -209,9 +220,17 @@ function ensureIgnored(entry) {
 
 // Auto-fix non-security validated findings (validation-gated, revertible).
 function applyFix(f) {
+  // Guard: only auto-fix findings whose `file` is a real, existing path. A fuzzy
+  // "file" field (e.g. "src/lib/api/limit (used by …)" or "src/app/api/ (multiple
+  // routes)") would otherwise make claude GUESS a target — which can land on a
+  // protected file and bypass the protected-path gate. Route these to PLAN instead.
+  if (!f.file || !existsSync(join(ROOT, f.file))) { log(`    ⊘ ${String(f.file).slice(0, 60)} — not a concrete file path → PLAN`); return false; }
   const prompt = `Apply EXACTLY this one fix and nothing else. File: ${f.file}. Issue: ${f.issue}. Fix: ${f.fix}. ` +
     `Edit ONLY ${f.file}; keep it minimal and behavior-preserving; do NOT edit tests to pass. Reply DONE.`;
-  spawnSync("claude", ["-p", "--model", "opus", "--permission-mode", "acceptEdits", prompt], { encoding: "utf8", shell: true, maxBuffer: 64 * 1024 * 1024, timeout: MODEL_TIMEOUT_MS, killSignal: "SIGKILL" });
+  // Prompt via STDIN, never as a shell arg: with shell:true on Windows, cmd.exe treats
+  // >,<,|,& in the finding text (e.g. "weight > 0)") as redirects/pipes — that mangles the
+  // prompt and writes claude's output into junk files like `0)` instead of editing f.file.
+  spawnSync("claude", ["-p", "--model", "opus", "--permission-mode", "acceptEdits"], { input: prompt, encoding: "utf8", shell: true, maxBuffer: 64 * 1024 * 1024, timeout: MODEL_TIMEOUT_MS, killSignal: "SIGKILL" });
   const v = validate();
   if (v.ok) {
     // Stage EVERYTHING the fix changed — the editor may have correctly touched
@@ -219,6 +238,18 @@ function applyFix(f) {
     // the run's own artifacts are never swept in.
     spawnSync("git", ["add", "-A"], { shell: true });
     const touched = changedFiles();
+    // No-op fix: an earlier same-file fix already resolved this finding, so the editor
+    // changed nothing. That's success-by-other-means, NOT a commit failure — count it as
+    // handled; do not revert or route it to PLAN.
+    if (!touched.length) { log(`    ↷ ${f.file} — already resolved by an earlier fix (nothing to commit).`); return true; }
+    // Guard: never auto-commit a change that touched a protected path, however the
+    // finding's `file` was phrased — belt-and-suspenders for the protected-path gate.
+    if (touched.some(isProtected)) {
+      spawnSync("git", ["reset", "--hard", "HEAD"], { shell: true });
+      spawnSync("git", ["clean", "-fd"], { shell: true });
+      log(`    ⚠ skipped — fix touched protected path(s): ${touched.filter(isProtected).join(", ")} → PLAN`);
+      return false;
+    }
     // Commit via -F <file>, never a shell-quoted -m: issue text contains (),
     // backticks and quotes that mangle the message and silently fail the commit.
     const msgFile = join(RUN_DIR, "_commit_msg.txt");
