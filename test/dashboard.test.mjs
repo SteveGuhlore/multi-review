@@ -110,3 +110,16 @@ test("aggregate: history keeps only the 10 most recent runs (newest last)", () =
   assert.equal(history[9].id, "loop-2026-06-17T13-00-00-000Z");
   assert.equal(history[0].id, "loop-2026-06-17T04-00-00-000Z");
 });
+
+test("parseRunDir: findings are sorted by severity, critical first (quick-read)", () => {
+  const run = parseRunDir("loop-2026-06-17T23-00-00-000Z", {
+    "round-1.json": [
+      { severity: "low", file: "a", issue: "x", support: ["claude"] },
+      { severity: "critical", file: "b", issue: "y", support: ["claude"] },
+      { severity: "info", file: "c", issue: "z", support: ["claude"] },
+      { severity: "medium", file: "d", issue: "w", support: ["claude"] },
+      { severity: "high", file: "e", issue: "v", support: ["claude"] },
+    ],
+  });
+  assert.deepEqual(run.findings.map((f) => f.severity), ["critical", "high", "medium", "low", "info"]);
+});
