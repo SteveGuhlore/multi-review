@@ -33,9 +33,15 @@ function sampleDashboard() {
   return writeDashboard(reviews);
 }
 
-e2e("e2e: dashboard renders in a browser with a clean debug console", async () => {
+e2e("e2e: dashboard renders in a browser with a clean debug console", { timeout: 120000 }, async (t) => {
   const out = sampleDashboard();
-  const browser = await chromium.launch();
+  let browser;
+  try {
+    browser = await chromium.launch({ timeout: 60000 });
+  } catch (e) {
+    t.skip(`browser not launchable (run: npx playwright install chromium) -- ${e.message}`);
+    return;
+  }
   try {
     const page = await browser.newPage();
     const consoleErrors = [];
