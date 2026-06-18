@@ -146,7 +146,37 @@ function callCodex(input) { const o = join(RUN_DIR, "_codex.txt"); runCli("codex
 // Gemini DEFAULTS to an interactive REPL; `-p` is its headless trigger (the prompt
 // is appended after stdin). WITHOUT it, gemini waits for interactive input and the
 // model-timeout kills it — the bug that showed as "gemini skipped (timed out) … review: 0".
-function callGemini(input) { const a = ["-p", "Review", "--approval-mode", "plan"]; if (process.env.MR_GEMINI_MODEL) a.push("--model", process.env.MR_GEMINI_MODEL); return runCli("gemini", "gemini", a, input).stdout || ""; }
+// Gemini via Vertex AI (direct REST) when configured: the gemini CLI's Vertex mode hangs,
+// and Vertex bills to your GCP project (drawing Cloud credit). Falls back to the gemini CLI
+// when Vertex env isn't set. Synchronous (curl) to match the rest of the loop.
+let _vertexToken;
+function vertexToken() {
+  if (_vertexToken) return _vertexToken;
+  const r = spawnSync("gcloud", ["auth", "application-default", "print-access-token"], { shell: true, encoding: "utf8", timeout: 60_000 });
+  _vertexToken = (r.stdout || "").trim();
+  return _vertexToken;
+}
+function callVertex(input) {
+  const proj = process.env.GOOGLE_CLOUD_PROJECT, loc = process.env.GOOGLE_CLOUD_LOCATION || "us-central1", model = process.env.MR_GEMINI_MODEL || "gemini-2.5-flash";
+  const token = vertexToken();
+  if (!token) { failed.add("gemini"); log("    ⚠ gemini (vertex): no ADC token — run `gcloud auth application-default login`. Dropped."); return ""; }
+  const url = `https://${loc}-aiplatform.googleapis.com/v1/projects/${proj}/locations/${loc}/publishers/google/models/${model}:generateContent`;
+  const body = JSON.stringify({ contents: [{ role: "user", parts: [{ text: input }] }] });
+  const curl = process.platform === "win32" ? "curl.exe" : "curl";
+  const r = spawnSync(curl, ["-s", "-X", "POST", url, "-H", `Authorization: Bearer ${token}`, "-H", "Content-Type: application/json", "--data-binary", "@-"], { input: body, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: MODEL_TIMEOUT_MS, killSignal: "SIGKILL" });
+  if (r.error || !r.stdout) { failed.add("gemini"); log(`    ⚠ gemini (vertex) ${(r.error && (r.error.code || r.error.message)) || "no output"} — dropped for the rest of this run.`); return ""; }
+  try {
+    const j = JSON.parse(r.stdout);
+    const c = j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts;
+    const t = (c || []).map((p) => p.text || "").join("");
+    if (!t && j.error) { failed.add("gemini"); log(`    ⚠ gemini (vertex) API error: ${String(j.error.message || "").slice(0, 120)} — dropped.`); }
+    return t;
+  } catch { failed.add("gemini"); log("    ⚠ gemini (vertex) non-JSON response — dropped."); return ""; }
+}
+function callGemini(input) {
+  if (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" && process.env.GOOGLE_CLOUD_PROJECT) return callVertex(input);
+  const a = ["-p", "Review", "--approval-mode", "plan"]; if (process.env.MR_GEMINI_MODEL) a.push("--model", process.env.MR_GEMINI_MODEL); return runCli("gemini", "gemini", a, input).stdout || "";
+}
 const has = (c) => spawnSync(c, ["--version"], { shell: true, timeout: 60_000 }).status === 0; // 60s: a CLI auto-updating (e.g. codex) can stall --version past 30s and get wrongly dropped
 
 const REVIEW =
