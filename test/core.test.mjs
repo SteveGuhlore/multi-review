@@ -6,6 +6,7 @@ import {
   sevRank, routeFinding, extractArr, extractObj, TerminationGuard, fingerprintFindings,
   isControlPlane, gateVerdict, buildManifest, sha256, parseAutonomy, autodetectConfig,
   findSecrets, findCodeSlop, manifestSha, verifyChain, pickLatestRoundFile,
+  makeOpt, tokenizeCmd, stripAnsi,
 } from "../lib/core.mjs";
 
 test("normPath converts backslashes to forward slashes", () => {
@@ -229,4 +230,37 @@ test("findSecrets is quiet on clean code and bad input", () => {
   assert.deepEqual(findSecrets("const x = 1 + 2; // nothing secret here"), []);
   assert.deepEqual(findSecrets(""), []);
   assert.deepEqual(findSecrets(null), []);
+});
+
+test("autodetectConfig: java/kotlin and broad perimeter (unioned single source of truth)", () => {
+  const files = { "pom.xml": "" };
+  const cfg = autodetectConfig({ exists: (f) => f in files, read: () => "" });
+  assert.ok(cfg.extensions.includes(".java") && cfg.extensions.includes(".kt"));
+  // Perimeter now covers the money/crypto globs the loop's old inline copy had.
+  for (const g of ["**/*wallet*", "**/*broker*", "**/*crypto*", "**/CODEOWNERS"]) {
+    assert.ok(cfg.protectedPaths.includes(g), `perimeter should include ${g}`);
+  }
+});
+
+test("makeOpt: reads flag values by index, honors empty, falls back when absent or trailing", () => {
+  const opt = makeOpt(["--target", "src", "--rounds", "0", "--empty", "", "--end"]);
+  assert.equal(opt("--target", "."), "src");
+  assert.equal(opt("--rounds", "6"), "0", "explicit 0 is not dropped");
+  assert.equal(opt("--empty", "d"), "", "explicit empty value honored");
+  assert.equal(opt("--missing", "fallback"), "fallback");
+  assert.equal(opt("--end", "fallback"), "fallback", "flag at end with no value falls back");
+});
+
+test("tokenizeCmd: respects quotes, passes arrays through, tolerates junk", () => {
+  assert.deepEqual(tokenizeCmd("pytest -q"), ["pytest", "-q"]);
+  assert.deepEqual(tokenizeCmd('mypy "src dir" --strict'), ["mypy", "src dir", "--strict"]);
+  assert.deepEqual(tokenizeCmd("echo 'a b' c"), ["echo", "a b", "c"]);
+  assert.deepEqual(tokenizeCmd(["mypy", "src dir"]), ["mypy", "src dir"]);
+  assert.deepEqual(tokenizeCmd(""), []);
+  assert.deepEqual(tokenizeCmd(null), []);
+});
+
+test("stripAnsi removes color escapes", () => {
+  assert.equal(stripAnsi("\x1b[32mok\x1b[0m"), "ok");
+  assert.equal(stripAnsi("plain"), "plain");
 });

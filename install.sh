@@ -17,6 +17,9 @@ cp "$SRC/lib/"*.mjs "$CLAUDE/multi-review/lib/"
 cp "$SRC/.goal.example.json" "$CLAUDE/multi-review/.goal.example.json"
 cp "$SRC/codex-review.ps1" "$CLAUDE/multi-review/" 2>/dev/null || true
 cp "$SRC/gemini-review.ps1" "$CLAUDE/multi-review/" 2>/dev/null || true
+cp "$SRC/codex-review.sh" "$CLAUDE/multi-review/" 2>/dev/null || true
+cp "$SRC/gemini-review.sh" "$CLAUDE/multi-review/" 2>/dev/null || true
+chmod +x "$CLAUDE/multi-review/codex-review.sh" "$CLAUDE/multi-review/gemini-review.sh" 2>/dev/null || true
 
 # Skills (recursive)
 cp -R "$SRC/skills/helpmecode" "$CLAUDE/skills/helpmecode"

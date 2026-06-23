@@ -19,18 +19,22 @@
 import { spawnSync } from "node:child_process";
 import { writeDashboard } from "./dashboard.mjs";
 import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
-import { join } from "node:path";
-import { runSummary, classifyCommit, aggregate } from "./lib/metrics.mjs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { runSummary, classifyCommit, aggregate, selfChangeAcceptable } from "./lib/metrics.mjs";
 import {
-  autodetectConfig, isProtected, routeFinding, gateVerdict, isControlPlane,
-  buildManifest, parseAutonomy, TerminationGuard, fingerprintFindings, netValidated,
+  autodetectConfig, routeFinding, gateVerdict, isControlPlane,
+  buildManifest, parseAutonomy, TerminationGuard, fingerprintFindings,
   findSecrets, findCodeSlop, manifestSha, pickLatestRoundFile, verifyChain,
+  makeOpt, tokenizeCmd, stripAnsi,
 } from "./lib/core.mjs";
+// Shared shell/git helpers (single source of truth — see lib/sh.mjs).
+import { cliWorks, toolPresent, trackedFiles, gitSha, changedFiles, runCmd } from "./lib/sh.mjs";
 
 // ---- args ------------------------------------------------------------------
 const argv = process.argv.slice(2);
 const flag = (k) => argv.includes(k);
-const opt = (k, d) => { const i = argv.indexOf(k); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
+const opt = makeOpt(argv);
 // Flags that consume the following token as their value.
 const VALUE_FLAGS = new Set(["--target", "--rounds", "--minutes", "--model-timeout"]);
 // Goal text = the bare positional tokens (not a flag, not a flag's value).
@@ -46,12 +50,13 @@ const MAX_ROUNDS = parseInt(opt("--rounds", "6"), 10);
 const MAX_MINUTES = parseInt(opt("--minutes", "180"), 10);
 const AUTONOMY = parseAutonomy(argv);
 const ROOT = process.cwd();
-const HERE = new URL(".", import.meta.url).pathname;
+// fileURLToPath (not URL.pathname) — pathname yields "/C:/…" on Windows and breaks join().
+const HERE = dirname(fileURLToPath(import.meta.url));
 const RUN_DIR = join("reviews", `goal-${new Date().toISOString().replace(/[:.]/g, "-")}`);
 
 const C = { dim: "\x1b[2m", b: "\x1b[1m", g: "\x1b[32m", y: "\x1b[33m", r: "\x1b[31m", c: "\x1b[36m", x: "\x1b[0m" };
 let LOGBUF = "";
-const log = (s = "") => { process.stdout.write(s + "\n"); LOGBUF += s.replace(/\x1b\[[0-9;]*m/g, "") + "\n"; };
+const log = (s = "") => { process.stdout.write(s + "\n"); LOGBUF += stripAnsi(s) + "\n"; };
 const flushLog = () => { try { writeFileSync(join(RUN_DIR, "log.md"), LOGBUF); } catch { /* dir not made yet */ } };
 
 // ---- config ----------------------------------------------------------------
@@ -75,12 +80,9 @@ function loadConfig() {
   return cfg;
 }
 
-// ---- tool / CLI detection --------------------------------------------------
-const have = (cmd, args = ["--version"]) =>
-  spawnSync(cmd, args, { shell: true, timeout: 30_000 }).status === 0;
+// ---- tool / CLI detection (cliWorks/toolPresent shared via lib/sh.mjs) ------
 function detectModels() {
-  return [["claude", () => have("claude")], ["codex", () => have("codex")], ["gemini", () => have("gemini")]]
-    .filter(([, f]) => f()).map(([n]) => n);
+  return ["claude", "codex", "gemini"].filter(cliWorks);
 }
 
 // ---- the gate ladder -------------------------------------------------------
@@ -97,19 +99,8 @@ function buildGateLadder(cfg) {
   const fromValidation = (cfg.validation?.default || []).map((cmd) => ({ name: cmd.length <= 24 ? cmd : cmd.split(" ")[0], cmd, required: true }));
   return [...builtin, ...fromValidation, ...(cfg.gates || [])];
 }
-// Cross-platform PATH probe: `command -v` is a POSIX shell builtin (absent from cmd.exe),
-// so on Windows we use `where`, which exits 0 iff the binary resolves on PATH.
-const toolPresent = (bin) =>
-  process.platform === "win32"
-    ? spawnSync("where", [bin], { shell: true, timeout: 15_000 }).status === 0
-    : spawnSync("command", ["-v", bin], { shell: true, timeout: 15_000 }).status === 0;
-
 // Built-in gates run in-process (no external tool, always available). Currently: a
 // secret scan over tracked files — gives the perimeter teeth with zero dependencies.
-function trackedFiles() {
-  const r = spawnSync("git", ["ls-files"], { shell: true, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  return (r.stdout || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean).filter((f) => !f.startsWith("reviews/"));
-}
 // Scan every tracked file with `detect(body)`; log up to 10 hits; pass iff none.
 function builtinScan(label, detect, fmt) {
   const hits = [];
@@ -135,16 +126,16 @@ function runGate(gate) {
     return { name: gate.name, pass: fn(), exitCode: null, required: gate.required };
   }
   if (DRY) return { name: gate.name, pass: true, dry: true, required: gate.required };
-  const [cmd, ...rest] = gate.cmd.split(" ");
+  const bin = tokenizeCmd(gate.cmd)[0]; // first bareword, just for the tool-presence probe
   // Degradable, but safely: if the tool is absent, a REQUIRED gate fails closed (we can't
   // verify, so we don't pass), while an optional gate is skipped. Never fail-open on a
   // required check just because its scanner isn't installed.
-  if (!toolPresent(cmd)) {
+  if (!toolPresent(bin)) {
     return gate.required === false
-      ? { name: gate.name, pass: null, skipped: true, reason: `${cmd} not installed`, required: false }
-      : { name: gate.name, pass: false, reason: `${cmd} not installed (required ⇒ fail-closed)`, required: true };
+      ? { name: gate.name, pass: null, skipped: true, reason: `${bin} not installed`, required: false }
+      : { name: gate.name, pass: false, reason: `${bin} not installed (required ⇒ fail-closed)`, required: true };
   }
-  const r = spawnSync(cmd, rest, { shell: true, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: "pipe" });
+  const r = runCmd(gate.cmd, { stdio: "pipe" });
   return { name: gate.name, pass: r.status === 0, exitCode: r.status ?? null, required: gate.required };
 }
 function runLadder(ladder) {
@@ -158,16 +149,8 @@ function runLadder(ladder) {
   return results;
 }
 
-// ---- phases (model-dependent; described under --dry-run) -------------------
-function gitSha() {
-  const r = spawnSync("git", ["rev-parse", "--short", "HEAD"], { shell: true, encoding: "utf8" });
-  return r.status === 0 ? r.stdout.trim() : null;
-}
-function changedFiles() {
-  const r = spawnSync("git", ["diff", "--name-only", "HEAD"], { shell: true, encoding: "utf8" });
-  return (r.stdout || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean).filter((f) => !f.startsWith("reviews/"));
-}
-
+// ---- phases (model-dependent; described under --dry-run) --------------------
+// gitSha() and changedFiles() are imported from lib/sh.mjs (shared with loop.mjs).
 function phasePlan(cfg, models) {
   log(`\n${C.b}● PLAN${C.x}  ${C.dim}/helpmecode — interview → research+validator → design${C.x}`);
   const planPath = join(RUN_DIR, "PLAN.md");
@@ -273,15 +256,33 @@ function reportMetrics() {
   const subjects = (spawnSync("git", ["log", "--pretty=%s", "-n", "500"], { shell: true, encoding: "utf8" }).stdout || "")
     .split(/\r?\n/).filter(Boolean);
   const report = aggregate(summaries, subjects.map(classifyCommit));
+
+  // Self-evaluation gate, wired (not just advertised): compare this snapshot against the
+  // last recorded one and apply the keep-a-self-rewrite-only-if-it-improves rule. The
+  // snapshot lives under gitignored reviews/, so this is drift detection across runs.
+  const snapPath = join("reviews", ".metrics-prev.json");
+  const cur = { escapeRate: report.escapeRateProxy, slopRate: report.slopRate };
+  let verdict = "";
+  if (existsSync(snapPath)) {
+    try {
+      const prev = JSON.parse(readFileSync(snapPath, "utf8"));
+      const ok = selfChangeAcceptable(prev, cur);
+      verdict = `- self-change gate vs last snapshot: **${ok ? "ACCEPT" : "REJECT"}** ` +
+        `(prev escape ${prev.escapeRate}/slop ${prev.slopRate} → now ${cur.escapeRate}/${cur.slopRate})\n`;
+    } catch { /* corrupt snapshot — ignore, reseed below */ }
+  }
+  try { mkdirSync("reviews", { recursive: true }); writeFileSync(snapPath, JSON.stringify(cur)); } catch { /* best effort */ }
+
   const md = `# /goal metrics\n\n` +
     `- runs analyzed: **${report.runs}** (clean: ${report.cleanRuns})\n` +
     `- slop-rate (slop-gate failures / run): **${report.slopRate}**\n` +
     `- commits scanned: **${report.commits}**\n` +
     `- escape signals (reverts + hotfixes): **${report.escapeSignals}**\n` +
-    `- bug-escape-rate (proxy): **${report.escapeRateProxy}**\n\n` +
+    `- bug-escape-rate (proxy): **${report.escapeRateProxy}**\n` +
+    verdict + `\n` +
     `_A self-rewrite is kept only if neither slop-rate nor escape-rate worsens and one improves._\n`;
   writeFileSync("METRICS.md", md);
-  log(md.replace(/\*\*/g, ""));
+  log(stripAnsi(md.replace(/\*\*/g, "")));
   log(`${C.dim}wrote METRICS.md${C.x}`);
 }
 
