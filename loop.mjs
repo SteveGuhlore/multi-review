@@ -25,7 +25,7 @@ import {
 } from "./lib/core.mjs";
 // Shared shell/git helpers (single source of truth — see lib/sh.mjs).
 import {
-  runCmd, cliWorks, changedFiles, currentBranch, workingTreeClean, gitShowJSON, trustedBaseRef,
+  runCmd, cliWorks, currentBranch, workingTreeClean, gitShowJSON, trustedBaseRef, applyInWorktree,
 } from "./lib/sh.mjs";
 import { writeDashboard } from "./dashboard.mjs";
 
@@ -66,11 +66,12 @@ const protectedPaths = applyPreflight();
 // Delegates to the shared matcher (which also fixes the "**/ must match repo root" hole).
 const isProtected = (f) => coreIsProtected(f, protectedPaths);
 
-// --apply is destructive (it reverts failed fixes with `git reset --hard`) and autonomous
-// (it auto-commits). Before enabling it we enforce, fail-safe to report-only:
+// --apply is autonomous (it auto-commits). Each fix is applied in an isolated worktree and
+// cherry-picked onto the branch only if validation stays green (see applyFix), so the user's
+// tree is never reset. Before enabling it we still enforce, fail-safe to report-only:
 //   • never on the default branch (hard refuse);
-//   • a clean working tree (or the revert would eat the user's uncommitted work);
-//   • a real validation matrix (or every fix would gate on nothing and revert);
+//   • a clean working tree (so each validated fix cherry-picks without conflict);
+//   • a real validation matrix (or every fix would gate on nothing);
 //   • a security perimeter loaded from the TRUSTED base branch, NOT the working tree —
 //     and report-only if the change set edits .multi-review.json at all, so a change can
 //     never weaken its own guardrails (mirrors the /multi-review command invariant).
@@ -82,9 +83,9 @@ function applyPreflight() {
 
   const branch = currentBranch();
   if (branch === "main" || branch === "master") { log("REFUSING --apply on the default branch."); process.exit(2); }
-  if (!workingTreeClean()) return off("--apply needs a clean working tree (failed fixes are reverted with `git reset --hard`); commit or stash first");
+  if (!workingTreeClean()) return off("--apply needs a clean working tree (each validated fix is cherry-picked onto it); commit or stash first");
   if (!(cfg.validation && Array.isArray(cfg.validation.default) && cfg.validation.default.length))
-    return off("--apply requested but .multi-review.json has no `validation.default` (every fix would revert)");
+    return off("--apply requested but .multi-review.json has no `validation.default` (nothing to gate fixes on)");
 
   const base = trustedBaseRef();
   if (!base) return off("--apply needs a default branch (main/master) as the trusted policy source");
@@ -191,52 +192,41 @@ const REVIEW =
   'Return ONLY a JSON array: [{"severity":"critical|high|medium|low|info","file":"path","issue":"...","fix":"one line"}].';
 // `sig` is imported from lib/core.mjs (findingSig) — identical: file + normalized issue prefix.
 
-function validate() {
+// Run the repo's validation matrix in `dir` (the worktree). String → shell (npm test etc.);
+// array → argv-exact. Quotes are handled by the shell, not pre-split, so `node -e "..."` works.
+function validateIn(dir) {
   for (const c of cfg.validation.default) {
     if (!c || (Array.isArray(c) && !c.length)) continue;
-    // String → shell (npm test etc.); array → argv-exact. Quotes are handled by the shell,
-    // not pre-split, so a command like `node -e "..."` runs correctly.
-    if (runCmd(c, { stdio: "ignore" }).status !== 0) return { ok: false, cmd: c };
+    if (runCmd(c, { stdio: "ignore", cwd: dir }).status !== 0) return { ok: false, cmd: c };
   }
   return { ok: true };
 }
 
-// changedFiles() is imported from lib/sh.mjs (shared with goal.mjs).
-
-// Keep the run's artifacts (and the temp commit-message file) out of commits and
-// out of `git clean`'s reach (clean skips gitignored paths). Idempotent.
+// Keep the run's artifacts out of commits and out of `git clean`'s reach (clean skips
+// gitignored paths). Idempotent.
 function ensureIgnored(entry) {
   const gi = ".gitignore";
   const cur = existsSync(gi) ? readFileSync(gi, "utf8") : "";
   if (!cur.split(/\r?\n/).some((l) => l.trim() === entry)) writeFileSync(gi, cur + (cur && !cur.endsWith("\n") ? "\n" : "") + entry + "\n");
 }
 
-// Auto-fix non-security validated findings (validation-gated, revertible).
+// Auto-fix a non-security validated finding — WORKTREE-ISOLATED. The model edit + the
+// validation run happen in a throwaway git worktree; only if validation stays green is the
+// change cherry-picked onto the branch. A failed attempt never touches the user's tree
+// (no `git reset --hard`), so there is no path to losing their work.
 function applyFix(f) {
-  const prompt = `Apply EXACTLY this one fix and nothing else. File: ${f.file}. Issue: ${f.issue}. Fix: ${f.fix}. ` +
-    `Edit ONLY ${f.file}; keep it minimal and behavior-preserving; do NOT edit tests to pass. Reply DONE.`;
-  spawnSync("claude", ["-p", "--model", "opus", "--permission-mode", "acceptEdits", prompt], { encoding: "utf8", shell: true, maxBuffer: 64 * 1024 * 1024, timeout: MODEL_TIMEOUT_MS, killSignal: "SIGKILL" });
-  const v = validate();
-  if (v.ok) {
-    // Stage EVERYTHING the fix changed — the editor may have correctly touched
-    // more than f.file (e.g. a companion migration). reviews/ is gitignored, so
-    // the run's own artifacts are never swept in.
-    spawnSync("git", ["add", "-A"], { shell: true });
-    const touched = changedFiles();
-    // Commit via -F <file>, never a shell-quoted -m: issue text contains (),
-    // backticks and quotes that mangle the message and silently fail the commit.
-    const msgFile = join(RUN_DIR, "_commit_msg.txt");
-    const subject = `fix(auto): ${String(f.issue || "").replace(/\s+/g, " ").trim().slice(0, 72)} [multi-review]`;
-    writeFileSync(msgFile, `${subject}\n\nAuto-applied by multi-review (validation-gated).\nFiles: ${touched.join(", ") || f.file}\n`);
-    const c = spawnSync("git", ["commit", "-F", msgFile], { encoding: "utf8", shell: true });
-    if (c.status === 0) { log(`    ✓ committed — files: ${touched.join(", ") || f.file}`); return true; }
-    log(`    ⚠ validation passed but commit failed: ${[c.stdout, c.stderr].map((s) => String(s || "").trim()).filter(Boolean).join(" | ").slice(0, 300) || ("exit " + c.status)}`);
-  }
-  // Revert the whole attempt (tracked edits + any new files the editor created).
-  // git clean respects .gitignore so node_modules is untouched, and `-e reviews` keeps the
-  // run's own artifacts safe even if reset reverted an uncommitted .gitignore "reviews/" line.
-  spawnSync("git", ["reset", "--hard", "HEAD"], { shell: true });
-  spawnSync("git", ["clean", "-fd", "-e", "reviews"], { shell: true });
+  const subject = `fix(auto): ${String(f.issue || "").replace(/\s+/g, " ").trim().slice(0, 72)} [multi-review]`;
+  const res = applyInWorktree({
+    message: `${subject}\n\nAuto-applied by multi-review (validation-gated, worktree-isolated).\n`,
+    edit: (dir) => {
+      const prompt = `Apply EXACTLY this one fix and nothing else. File: ${f.file}. Issue: ${f.issue}. Fix: ${f.fix}. ` +
+        `Edit ONLY ${f.file}; keep it minimal and behavior-preserving; do NOT edit tests to pass. Reply DONE.`;
+      spawnSync("claude", ["-p", "--model", "opus", "--permission-mode", "acceptEdits", prompt], { cwd: dir, encoding: "utf8", shell: true, maxBuffer: 64 * 1024 * 1024, timeout: MODEL_TIMEOUT_MS, killSignal: "SIGKILL" });
+    },
+    validate: (dir) => validateIn(dir).ok,
+  });
+  if (res.ok && res.committed) { log(`    ✓ committed (isolated) — files: ${res.touched.join(", ") || f.file}`); return true; }
+  if (res.error) log(`    ⚠ fix not applied: ${String(res.error).slice(0, 200)}`);
   return false;
 }
 

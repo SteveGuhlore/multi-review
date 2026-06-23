@@ -1,6 +1,8 @@
 {
   "_comment": "Copy to .goal.json to activate. Every gate is OPTIONAL and degradable: if its tool is absent, a required gate fails closed (blocks) and an optional one (required:false) is skipped. controlPlane gates NEVER run autonomously. This ladder turns the round-2 research into concrete, runnable slots — see docs/RESEARCH.md.",
   "securityMode": "propose-isolated",
+  "_synth_comment": "Optional built-in mutation-guided test-synthesis ACCEPTANCE gate. The generation half (mutation engine + a model proposing tests) is external and writes a JSON array [{name,runsClean,killsMutant,raisesCoverage,flaky}] to `candidates`; this gate admits only trustworthy tests (no model judgment). Degradable: absent file ⇒ skipped. Omit this block to disable.",
+  "synth": { "candidates": "reviews/synth-candidates.json", "required": false },
   "gates": [
     { "name": "diff-coverage",    "cmd": "diff-cover coverage.xml --compare-branch=origin/main --fail-under=90", "required": true,  "_why": "fail unless changed lines are covered (kills 'added code, no tests')" },
     { "name": "mutation",         "cmd": "npx stryker run --incremental",                                           "required": true,  "_why": "keystone: tests that survive injected faults are theater" },

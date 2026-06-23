@@ -16,12 +16,12 @@ multi-review/
 │   │                     #   changedFiles, trusted-base/working-tree git probes)
 │   ├── metrics.mjs       # self-eval: bug-escape + slop rate, keep-a-rewrite rule
 │   └── synth.mjs         # mutation-guided test-synthesis acceptance gate (deterministic
-│                         #   half built + tested; not yet wired into the runtime loop)
+│                         #   half wired as /goal's optional `synth` gate; generation external)
 ├── scripts/
 │   └── deny-copyleft.mjs # license-policy gate (GPL/AGPL/SSPL), reads ScanCode JSON
 ├── commands/             # /goal + /multi-review slash commands
 ├── skills/helpmecode/    # the planner skill (interview→research→design→handoff)
-├── test/                 # node:test suites (74 tests) — unit + integration
+├── test/                 # node:test suites (83 tests) — unit + integration
 └── .goal.example.json    # the full degradable gate ladder (copy to .goal.json)
 ```
 
@@ -38,16 +38,18 @@ but differ by design:
 |---|---|---|
 | Driver | Claude orchestrates interactively | autonomous, unattended, multi-round |
 | Auto-apply scope | severity ≥ high, mechanical | high/medium/low, outside perimeter |
-| Apply isolation | isolated git worktree | in-place commit, `git reset --hard` on revert |
+| Apply isolation | isolated git worktree | isolated git worktree (`applyInWorktree`) |
 | Trusted policy source | base revision (`git show <base>:…`) | trusted base branch (same intent) |
 | Config-edit guard | edits to `.multi-review.json` ⇒ report-only | same |
-| Clean-tree precondition | n/a (worktree) | required (revert is destructive) |
+| Clean-tree precondition | n/a (worktree) | required (for clean cherry-pick) |
 
-Both now enforce the same **`--apply` guardrails** (default-branch refusal, trusted-base
-perimeter, config-edit ⇒ report-only). `loop.mjs` is the more aggressive autonomous engine:
-it can also fix medium/low findings, but only outside the perimeter, validation-gated,
-revertible, and branch-only. The interactive command stays conservative (high-only, worktree
-isolated) because a human is in the loop.
+Both enforce the same **`--apply` guardrails** (default-branch refusal, trusted-base
+perimeter, config-edit ⇒ report-only) and both now apply each fix in an **isolated git
+worktree**, cherry-picking onto the branch only if validation stays green — a failed fix
+never touches your working tree. The remaining difference is intent: `loop.mjs` is the
+autonomous engine (also fixes medium/low, but only outside the perimeter, validation-gated,
+branch-only); the interactive command stays conservative (high-only) because a human is in
+the loop.
 
 ## The loop (implemented spine)
 
@@ -90,9 +92,11 @@ flowchart TD
 - **Tamper-evident provenance** — each run-manifest carries `prev = sha256(previous)`;
   `verifyChain` / `goal --verify` detect any alteration. (Tested.)
 - **`--apply` guardrails** — `loop.mjs` refuses on the default branch, requires a clean
-  working tree (its revert is `git reset --hard`), loads the perimeter from the trusted base
-  branch, and falls to report-only if the change edits `.multi-review.json` — a change can't
-  weaken its own guardrails. (Tested: `test/loop.integration.test.mjs`.)
+  working tree, loads the perimeter from the trusted base branch, refuses an empty perimeter,
+  and falls to report-only if the change edits `.multi-review.json` — a change can't weaken
+  its own guardrails. Each fix is applied in an isolated worktree and cherry-picked only if
+  validation holds (`applyInWorktree`), so a failed fix never touches your tree. (Tested:
+  `test/loop.integration.test.mjs`, `test/sh.worktree.test.mjs`.)
 - **Self-evaluation** — `selfChangeAcceptable`: a self-rewrite is kept only if neither
   bug-escape-rate nor slop-rate worsens and one improves. (Tested.)
 

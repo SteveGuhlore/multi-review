@@ -22,6 +22,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from 
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runSummary, classifyCommit, aggregate, selfChangeAcceptable } from "./lib/metrics.mjs";
+import { selectGeneratedTests, summarizeSynthesis } from "./lib/synth.mjs";
 import {
   autodetectConfig, routeFinding, gateVerdict, isControlPlane,
   buildManifest, parseAutonomy, TerminationGuard, fingerprintFindings,
@@ -95,6 +96,8 @@ function buildGateLadder(cfg) {
   const builtin = [
     ...(cfg.secretScan === false ? [] : [{ name: "secrets (builtin)", builtin: "secrets", required: true }]),
     ...(cfg.codeSlopScan === false ? [] : [{ name: "code-slop (builtin)", builtin: "codeslop", required: true }]),
+    // Opt-in (needs a candidate-generation step upstream); advisory unless cfg.synth.required.
+    ...(cfg.synth ? [{ name: "synth (builtin)", builtin: "synth", required: cfg.synth.required === true }] : []),
   ];
   const fromValidation = (cfg.validation?.default || []).map((cmd) => {
     const label = Array.isArray(cmd) ? cmd.join(" ") : cmd; // array-form cmd is valid (see tokenizeCmd/runCmd)
@@ -115,18 +118,40 @@ function builtinScan(label, detect, fmt) {
   for (const h of hits.slice(0, 10)) log(`      ${C.r}${label}${C.x} ${h.file}:${h.line} ${C.dim}${fmt(h)}${C.x}`);
   return hits.length === 0;
 }
+// Mutation-guided test-synthesis ACCEPTANCE gate (lib/synth.mjs). The generation half
+// (mutation engine + a model proposing candidate tests) is external; it deposits results as
+// a JSON array [{name,runsClean,killsMutant,raisesCoverage,flaky}] at cfg.synth.candidates
+// (default reviews/synth-candidates.json). This gate runs the DETERMINISTIC admission rule —
+// no model judgment — and passes iff ≥1 trustworthy test was admitted. Degradable: with no
+// candidates file it skips (never blocks), so enabling synth can't wedge a run.
+function synthGate(cfg) {
+  const path = (cfg.synth && cfg.synth.candidates) || "reviews/synth-candidates.json";
+  if (!existsSync(path)) return { pass: null, skipped: true, reason: `no candidates (${path})` };
+  let cands;
+  try { cands = JSON.parse(readFileSync(path, "utf8")); } catch { return { pass: false, reason: `${path} is not valid JSON` }; }
+  if (!Array.isArray(cands)) return { pass: false, reason: `${path} must be a JSON array of candidates` };
+  const result = selectGeneratedTests(cands);
+  const summary = summarizeSynthesis(result);
+  for (const r of result.rejected.slice(0, 10)) log(`      ${C.dim}synth reject ${r.name}: ${r.reason}${C.x}`);
+  return { pass: summary.pass, reason: `${summary.admitted}/${summary.proposed} admitted` };
+}
 const BUILTINS = {
   secrets: () => builtinScan("secret", findSecrets, (h) => `${h.type} ${h.match}`),
   codeslop: () => builtinScan("code-slop", findCodeSlop, (h) => h.type),
+  synth: synthGate,
 };
 
-function runGate(gate) {
+function runGate(gate, cfg) {
   if (isControlPlane(gate)) return { name: gate.name, pass: null, skipped: true, reason: "control-plane (never autonomous)", required: gate.required };
   if (gate.builtin) {
     if (DRY) return { name: gate.name, pass: true, dry: true, required: gate.required };
     const fn = BUILTINS[gate.builtin];
     if (!fn) return { name: gate.name, pass: false, reason: `unknown builtin '${gate.builtin}'`, required: gate.required };
-    return { name: gate.name, pass: fn(), exitCode: null, required: gate.required };
+    const out = fn(cfg);
+    // A builtin may return a boolean (pass) or a full result object (skip/reason).
+    return (out && typeof out === "object")
+      ? { name: gate.name, exitCode: null, required: gate.required, ...out }
+      : { name: gate.name, pass: out, exitCode: null, required: gate.required };
   }
   if (DRY) return { name: gate.name, pass: true, dry: true, required: gate.required };
   const bin = tokenizeCmd(gate.cmd)[0]; // first bareword, just for the tool-presence probe
@@ -141,10 +166,10 @@ function runGate(gate) {
   const r = runCmd(gate.cmd, { stdio: "pipe" });
   return { name: gate.name, pass: r.status === 0, exitCode: r.status ?? null, required: gate.required };
 }
-function runLadder(ladder) {
+function runLadder(ladder, cfg) {
   const results = [];
   for (const g of ladder) {
-    const res = runGate(g);
+    const res = runGate(g, cfg);
     const mark = res.skipped ? `${C.y}skip${C.x}` : res.dry ? `${C.dim}dry${C.x}` : res.pass ? `${C.g}pass${C.x}` : `${C.r}FAIL${C.x}`;
     log(`    ${mark}  ${g.name}${res.reason ? ` ${C.dim}(${res.reason})${C.x}` : ""}${res.exitCode ? ` ${C.dim}exit ${res.exitCode}${C.x}` : ""}`);
     results.push(res);
@@ -356,7 +381,7 @@ function main() {
     }
 
     log(`\n${C.b}● GATES${C.x}  ${C.dim}fail-closed; data-plane only; control-plane gates skipped${C.x}`);
-    const gateResults = runLadder(ladder);
+    const gateResults = runLadder(ladder, cfg);
     const verdict = gateVerdict(gateResults);
     log(`    → ${verdict.pass ? `${C.g}gates green${C.x}` : `${C.r}gates blocked${C.x} (${verdict.failures.join(", ")})`}`);
     guard.recordFix(verdict.pass);

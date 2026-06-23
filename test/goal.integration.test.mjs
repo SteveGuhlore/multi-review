@@ -81,6 +81,47 @@ test("goal --gates-only: array-form validation command builds + runs without man
   assert.ok(manifest.gates.find((g) => g.name === "node --version"), "array cmd gets a readable joined name");
 });
 
+test("goal --gates-only: synth gate admits a trustworthy candidate ⇒ green", () => {
+  const candidate = [{ name: "t_kills_mutant", runsClean: true, killsMutant: true, raisesCoverage: true, flaky: false }];
+  const { stdout, manifest } = runGoalInFixture(
+    {
+      "package.json": JSON.stringify({ name: "fix", version: "1.0.0" }),
+      ".goal.json": JSON.stringify({ synth: { candidates: "synth-candidates.json", required: true } }),
+      "synth-candidates.json": JSON.stringify(candidate),
+    },
+    ["--gates-only"],
+  );
+  assert.match(stdout, /gates green/);
+  const g = manifest.gates.find((x) => x.name === "synth (builtin)");
+  assert.ok(g && g.pass === true, "synth gate present and passing");
+});
+
+test("goal --gates-only: synth required gate blocks when no candidate is admissible", () => {
+  const allRejected = [{ name: "t_assertionless", runsClean: true, killsMutant: false, raisesCoverage: true, flaky: false }];
+  const { stdout, manifest } = runGoalInFixture(
+    {
+      "package.json": JSON.stringify({ name: "fix", version: "1.0.0" }),
+      ".goal.json": JSON.stringify({ synth: { candidates: "synth-candidates.json", required: true } }),
+      "synth-candidates.json": JSON.stringify(allRejected),
+    },
+    ["--gates-only"],
+  );
+  assert.match(stdout, /gates blocked/);
+  assert.equal(manifest.gates.find((x) => x.name === "synth (builtin)").pass, false);
+});
+
+test("goal --gates-only: synth gate is skipped (never blocks) when no candidates file exists", () => {
+  const { stdout, manifest } = runGoalInFixture(
+    {
+      "package.json": JSON.stringify({ name: "fix", version: "1.0.0" }),
+      ".goal.json": JSON.stringify({ synth: { candidates: "synth-candidates.json", required: true } }),
+    },
+    ["--gates-only"],
+  );
+  assert.match(stdout, /gates green/); // degradable: absent candidates ⇒ skip, not block
+  assert.equal(manifest.gates.find((x) => x.name === "synth (builtin)").pass, false, "skipped gate recorded as not-passed but non-blocking");
+});
+
 function withFixture(setup, fn) {
   const dir = mkdtempSync(join(tmpdir(), "goal-it-"));
   try { setup(dir); return fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); }

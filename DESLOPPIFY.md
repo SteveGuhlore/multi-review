@@ -27,6 +27,15 @@ Legend: 🔴 critical · 🟡 medium · 🟢 nice-to-have · ☐ open · ☑ don
 
 New tests: `test/loop.integration.test.mjs` (the `--apply` preflight — `loop.mjs` was 0% before).
 
+### Follow-ups shipped (beyond the original backlog)
+
+| Item | Resolution |
+|------|------------|
+| Worktree-isolated `--apply` (closes most of M1) | `lib/sh.applyInWorktree` — each fix applied in a throwaway git worktree, cherry-picked only if validation holds; **no `git reset --hard` on your tree**. `loop.mjs` `applyFix` rewritten onto it. Tests: `test/sh.worktree.test.mjs`. |
+| Synth generation-gate wired | `lib/synth.mjs` deterministic acceptance gate now runs as `/goal`'s optional, degradable `synth` gate (`goal.mjs`); generation half stays external (candidates JSON). Tests in `test/goal.integration.test.mjs`. |
+
+Suite now: **82 pass / 1 skip** (83 total).
+
 ---
 
 ## 1. Critical issues
