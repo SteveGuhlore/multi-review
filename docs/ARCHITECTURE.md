@@ -10,20 +10,44 @@ multi-review/
 ├── goal.mjs              # /goal orchestrator — the loop driver + gate runner + manifests
 ├── loop.mjs              # multi-review autonomous review loop (Claude+Codex+Gemini)
 ├── lib/
-│   ├── core.mjs          # tested pure core: perimeter, routing, termination, gates,
-│   │                     #   secrets, provenance (manifest chain)
+│   ├── core.mjs          # tested PURE core: perimeter, routing, termination, gates,
+│   │                     #   secrets, provenance (manifest chain), arg/cmd helpers
+│   ├── sh.mjs            # shared IMPURE shell/git helpers (tool detection, runCmd,
+│   │                     #   changedFiles, trusted-base/working-tree git probes)
 │   ├── metrics.mjs       # self-eval: bug-escape + slop rate, keep-a-rewrite rule
-│   └── synth.mjs         # mutation-guided test-synthesis acceptance gate
+│   └── synth.mjs         # mutation-guided test-synthesis acceptance gate (deterministic
+│                         #   half built + tested; not yet wired into the runtime loop)
 ├── scripts/
 │   └── deny-copyleft.mjs # license-policy gate (GPL/AGPL/SSPL), reads ScanCode JSON
 ├── commands/             # /goal + /multi-review slash commands
 ├── skills/helpmecode/    # the planner skill (interview→research→design→handoff)
-├── test/                 # node:test suites (46 tests) — unit + integration
+├── test/                 # node:test suites (74 tests) — unit + integration
 └── .goal.example.json    # the full degradable gate ladder (copy to .goal.json)
 ```
 
 `goal.mjs`, `loop.mjs`, `metrics.mjs`, and `synth.mjs` all build on the single tested
-`lib/core.mjs` — one source of truth for the risky logic.
+`lib/core.mjs` (pure logic) and share `lib/sh.mjs` for shell/git side effects — one source
+of truth for the risky logic, no per-CLI copies.
+
+## Two review engines (intentional)
+
+There are two ways to run a multi-model review; they share `lib/core.mjs` + `lib/sh.mjs`
+but differ by design:
+
+| | `commands/multi-review.md` | `loop.mjs` |
+|---|---|---|
+| Driver | Claude orchestrates interactively | autonomous, unattended, multi-round |
+| Auto-apply scope | severity ≥ high, mechanical | high/medium/low, outside perimeter |
+| Apply isolation | isolated git worktree | in-place commit, `git reset --hard` on revert |
+| Trusted policy source | base revision (`git show <base>:…`) | trusted base branch (same intent) |
+| Config-edit guard | edits to `.multi-review.json` ⇒ report-only | same |
+| Clean-tree precondition | n/a (worktree) | required (revert is destructive) |
+
+Both now enforce the same **`--apply` guardrails** (default-branch refusal, trusted-base
+perimeter, config-edit ⇒ report-only). `loop.mjs` is the more aggressive autonomous engine:
+it can also fix medium/low findings, but only outside the perimeter, validation-gated,
+revertible, and branch-only. The interactive command stays conservative (high-only, worktree
+isolated) because a human is in the loop.
 
 ## The loop (implemented spine)
 
@@ -65,6 +89,10 @@ flowchart TD
   fingerprint, consecutive-failure breaker; never blocks-and-waits. (Tested.)
 - **Tamper-evident provenance** — each run-manifest carries `prev = sha256(previous)`;
   `verifyChain` / `goal --verify` detect any alteration. (Tested.)
+- **`--apply` guardrails** — `loop.mjs` refuses on the default branch, requires a clean
+  working tree (its revert is `git reset --hard`), loads the perimeter from the trusted base
+  branch, and falls to report-only if the change edits `.multi-review.json` — a change can't
+  weaken its own guardrails. (Tested: `test/loop.integration.test.mjs`.)
 - **Self-evaluation** — `selfChangeAcceptable`: a self-rewrite is kept only if neither
   bug-escape-rate nor slop-rate worsens and one improves. (Tested.)
 

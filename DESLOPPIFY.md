@@ -1,16 +1,37 @@
 # DESLOPPIFY — cleanup backlog
 
-A prioritized review of `multi-review` / `/goal`. Nothing here is fixed yet; this is the
-working backlog. Each item lists **where**, **why it matters**, **recommendation**, and
-**safe to fix now? / wait**.
+A prioritized review of `multi-review` / `/goal`. Each item lists **where**, **why it
+matters**, **recommendation**, and **safe to fix now? / wait**.
 
 Legend: 🔴 critical · 🟡 medium · 🟢 nice-to-have · ☐ open · ☑ done
+
+## ✅ Status: all items addressed (suite 73 pass / 1 skip, was 64)
+
+| ID | Resolution |
+|----|------------|
+| C1 | `--apply` loads perimeter from trusted base branch + config-edit ⇒ report-only (`loop.mjs` `applyPreflight`) |
+| C2 | `--apply` requires clean tree; `git clean -e reviews` protects artifacts |
+| C3 | inline `autodetect()` deleted; both CLIs use unioned `autodetectConfig` |
+| M1 | two engines documented (`docs/ARCHITECTURE.md`); shared guardrails aligned |
+| M2 | dead `netValidated` import removed; `selfChangeAcceptable` wired into `--metrics`; `synth.mjs` labeled built-but-unwired |
+| M3 | `goal.mjs` uses `fileURLToPath` (Windows path fix) |
+| M4 | POSIX `codex-review.sh` / `gemini-review.sh` added + installed |
+| M5 | shared helpers in `lib/core.mjs` + new `lib/sh.mjs`; no per-CLI copies |
+| M6 | `loop.mjs` `log()` appends (O(1)) |
+| M7 | `runCmd` — string under shell, array argv-exact; no naive `split(" ")` |
+| N1 | `test-results/.last-run.json` untracked; `test-results/` gitignored |
+| N2 | resolved by `makeOpt` (index-based; honors explicit empty/0) — note: original "drops 0" was inaccurate (`"0"` is truthy); the consolidated impl is strictly more correct |
+| N3 | shared `stripAnsi`; loggers kept fit-for-purpose (append vs buffer) |
+| N4 | docs reconciled (ARCHITECTURE/README/ROADMAP); synth status clarified |
+| N5 | richer detection (Java/Kotlin, `setup.cfg`, money/crypto globs) folded into core |
+
+New tests: `test/loop.integration.test.mjs` (the `--apply` preflight — `loop.mjs` was 0% before).
 
 ---
 
 ## 1. Critical issues
 
-### 🔴 C1 — `loop.mjs --apply` can have its security perimeter weakened by the change under review ☐
+### 🔴 C1 — `loop.mjs --apply` can have its security perimeter weakened by the change under review ☑
 - **Where:** `loop.mjs:44` (config loaded from working tree) + `loop.mjs:248-251`, `applyFix` at `loop.mjs:211`.
 - **Why it matters:** `loop.mjs` reads `.multi-review.json` (the `protectedPaths` perimeter + validation
   matrix) from the **working tree**. The `/multi-review` command spec (`commands/multi-review.md:60-67, 85-86`)
@@ -22,7 +43,7 @@ Legend: 🔴 critical · 🟡 medium · 🟢 nice-to-have · ☐ open · ☑ don
   modifies `.multi-review.json` at all, drop to report-only. Mirror the command spec's invariant.
 - **Safe to fix now?** Yes, but it changes `--apply` behavior — add a test (the loop has none yet) alongside it.
 
-### 🔴 C2 — `--apply` revert path can destroy pre-existing uncommitted work ☐
+### 🔴 C2 — `--apply` revert path can destroy pre-existing uncommitted work ☑
 - **Where:** `loop.mjs:233-234` (`git reset --hard HEAD` + `git clean -fd`) inside `applyFix`.
 - **Why it matters:** On any fix that fails validation, the loop hard-resets the working tree and runs
   `git clean -fd`. If the user had uncommitted changes when they launched `--apply`, those are silently and
@@ -31,7 +52,7 @@ Legend: 🔴 critical · 🟡 medium · 🟢 nice-to-have · ☐ open · ☑ don
   with a clear message otherwise; or stash-and-restore around the run. Document the precondition.
 - **Safe to fix now?** Yes — adding a precondition check is low-risk and purely protective.
 
-### 🔴 C3 — `autodetect()` is duplicated and has **diverged** from the shared core ☐
+### 🔴 C3 — `autodetect()` is duplicated and has **diverged** from the shared core ☑
 - **Where:** inline `autodetect()` at `loop.mjs:66-95` vs `autodetectConfig()` at `lib/core.mjs:263-296`
   (the latter is pure + unit-tested; `goal.mjs:61` already uses it).
 - **Why it matters:** The two entry points seed **different** `.multi-review.json`. `loop.mjs`'s copy detects
@@ -49,7 +70,7 @@ Legend: 🔴 critical · 🟡 medium · 🟢 nice-to-have · ☐ open · ☑ don
 
 ## 2. Medium cleanup items
 
-### 🟡 M1 — Two divergent review engines with different `--apply` safety semantics ☐
+### 🟡 M1 — Two divergent review engines with different `--apply` safety semantics ☑
 - **Where:** `commands/multi-review.md` (Claude-orchestrated flow) vs `loop.mjs` (autonomous flow).
 - **Why it matters:** Same product, two implementations with materially different guardrails. The command spec:
   isolated git worktree, severity ≥ **high**, config from trusted base, config-edit ⇒ report-only. `loop.mjs`:
@@ -59,7 +80,7 @@ Legend: 🔴 critical · 🟡 medium · 🟢 nice-to-have · ☐ open · ☑ don
   isolation + base-config are the safe defaults). At minimum, document the divergence explicitly.
 - **Safe to fix now?** Partially — documenting is safe now; unifying execution is a larger change, do after C1–C3.
 
-### 🟡 M2 — Dead / unwired code: tested but never called ☐
+### 🟡 M2 — Dead / unwired code: tested but never called ☑
 - **Where:** `lib/synth.mjs` (entire module — no importer outside its test); `lib/metrics.mjs`
   `selfChangeAcceptable` (`:52`) and `bugEscapeRate` (`:35`) (only referenced in a *comment* at
   `goal.mjs:261`); unused `netValidated` import at `goal.mjs:26`.
@@ -71,7 +92,7 @@ Legend: 🔴 critical · 🟡 medium · 🟢 nice-to-have · ☐ open · ☑ don
   `netValidated` import now.
 - **Safe to fix now?** The unused import: yes. The modules: decide wire-vs-remove first (cheap, no behavior risk).
 
-### 🟡 M3 — Windows-breaking path resolution in `goal.mjs` ☐
+### 🟡 M3 — Windows-breaking path resolution in `goal.mjs` ☑
 - **Where:** `goal.mjs:49` `const HERE = new URL(".", import.meta.url).pathname;` then `join(HERE, "loop.mjs")`
   at `:204`.
 - **Why it matters:** On Windows `URL.pathname` yields `/C:/…`, which `path.join` mangles — so `/goal`'s
@@ -80,7 +101,7 @@ Legend: 🔴 critical · 🟡 medium · 🟢 nice-to-have · ☐ open · ☑ don
 - **Recommendation:** `import { fileURLToPath } from "node:url"` and `const HERE = dirname(fileURLToPath(import.meta.url))`.
 - **Safe to fix now?** Yes — straight correctness fix.
 
-### 🟡 M4 — `/multi-review` references POSIX wrappers that don't exist ☐
+### 🟡 M4 — `/multi-review` references POSIX wrappers that don't exist ☑
 - **Where:** `commands/multi-review.md:44-46` cites `codex-review.sh` / `gemini-review.sh`; only `.ps1` versions
   exist (`codex-review.ps1`, `gemini-review.ps1`), and `install.sh:18-19` copies only the `.ps1` files.
 - **Why it matters:** The POSIX `/multi-review` path points at files that are never created — broken docs and a
@@ -89,7 +110,7 @@ Legend: 🔴 critical · 🟡 medium · 🟢 nice-to-have · ☐ open · ☑ don
   the actual POSIX invocation.
 - **Safe to fix now?** Yes.
 
-### 🟡 M5 — Duplicated helpers across `loop.mjs` and `goal.mjs` ☐
+### 🟡 M5 — Duplicated helpers across `loop.mjs` and `goal.mjs` ☑
 - **Where:** `opt()` (`loop.mjs:26`, `goal.mjs:33`); `changedFiles()` (`loop.mjs:197`, `goal.mjs:166`); three
   separate tool-detection impls — `has` (`loop.mjs:180`, `--version`), `have` (`goal.mjs:79`, `--version`),
   `toolPresent` (`goal.mjs:102`, `command -v`/`where`); two different `log()` impls.
@@ -99,14 +120,14 @@ Legend: 🔴 critical · 🟡 medium · 🟢 nice-to-have · ☐ open · ☑ don
   (the `command -v`/`where` version is the most correct) and import in both.
 - **Safe to fix now?** Yes, incrementally — these are pure helpers; move one at a time with a test each.
 
-### 🟡 M6 — `loop.mjs` `log()` is O(n²) file I/O ☐
+### 🟡 M6 — `loop.mjs` `log()` is O(n²) file I/O ☑
 - **Where:** `loop.mjs:42` — reads the entire existing log file and rewrites it on **every** line.
 - **Why it matters:** For long autonomous runs (the intended use) the log file is re-read+rewritten per line,
   which is quadratic and slows as it grows. `goal.mjs:54` already buffers correctly.
 - **Recommendation:** Use `appendFileSync` (or buffer + flush like `goal.mjs`).
 - **Safe to fix now?** Yes — behavior-preserving.
 
-### 🟡 M7 — Naive gate/validation command parsing ☐
+### 🟡 M7 — Naive gate/validation command parsing ☑
 - **Where:** `goal.mjs:138` `gate.cmd.split(" ")`; `loop.mjs:190` `c.split(" ")` in `validate()`.
 - **Why it matters:** Any command with a quoted argument or a path containing spaces is split incorrectly,
   silently running the wrong command (or failing closed on a required gate ⇒ false "blocked").
@@ -117,31 +138,31 @@ Legend: 🔴 critical · 🟡 medium · 🟢 nice-to-have · ☐ open · ☑ don
 
 ## 3. Nice-to-have polish
 
-### 🟢 N1 — Stale Playwright artifact committed to the repo ☐
+### 🟢 N1 — Stale Playwright artifact committed to the repo ☑
 - **Where:** `test-results/.last-run.json` (tracked; content `{"status":"failed",...}`).
 - **Why it matters:** A generated, stale test artifact is checked in; `test-results/` isn't gitignored.
 - **Recommendation:** `git rm --cached` it and add `test-results/` to `.gitignore`.
 - **Safe to fix now?** Yes.
 
-### 🟢 N2 — `--rounds 0` / empty option values silently ignored ☐
+### 🟢 N2 — `--rounds 0` / empty option values silently ignored ☑
 - **Where:** `opt()` (`loop.mjs:26`, `goal.mjs:33`) — `argv[i+1]` truthiness check drops `0`/empty.
 - **Why it matters:** Minor surprising-input edge; `--rounds 0` falls back to the default instead of erroring.
 - **Recommendation:** Distinguish "flag absent" from "value present" by index, not truthiness.
 - **Safe to fix now?** Yes (fold into the M5 consolidation).
 
-### 🟢 N3 — Consolidate ad-hoc logging/ANSI handling ☐
+### 🟢 N3 — Consolidate ad-hoc logging/ANSI handling ☑
 - **Where:** color object `C` only in `goal.mjs:52`; `loop.mjs` and `dashboard.mjs` log differently.
 - **Why it matters:** Cosmetic inconsistency once `log()`/helpers are shared (M5/M6).
 - **Recommendation:** Single small logging helper in `lib/` with ANSI-strip-on-buffer.
 - **Safe to fix now?** Yes, after M5/M6.
 
-### 🟢 N4 — Docs/README accuracy pass for unwired features ☐
+### 🟢 N4 — Docs/README accuracy pass for unwired features ☑
 - **Where:** `README.md`, `docs/` — claims about the self-evaluating/synthesis loop (see M2).
 - **Why it matters:** If `synth`/`selfChangeAcceptable` stay unwired, docs overstate current capability.
 - **Recommendation:** Align docs with whatever M2 decides (wire vs. mark experimental).
 - **Safe to fix now?** Yes, after M2.
 
-### 🟢 N5 — Enrich `autodetectConfig` when merging the duplicate (follow-up to C3) ☐
+### 🟢 N5 — Enrich `autodetectConfig` when merging the duplicate (follow-up to C3) ☑
 - **Where:** `lib/core.mjs:263-296`.
 - **Why it matters:** Core's detector lacks Java/Kotlin, `setup.cfg`, and several protected globs that the
   loop's copy had; collapsing to one shouldn't lose that coverage.
