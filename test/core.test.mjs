@@ -242,11 +242,11 @@ test("autodetectConfig: java/kotlin and broad perimeter (unioned single source o
   }
 });
 
-test("makeOpt: reads flag values by index, honors empty, falls back when absent or trailing", () => {
+test("makeOpt: reads flag values; 0 preserved; empty/absent/trailing fall back (no NaN caps)", () => {
   const opt = makeOpt(["--target", "src", "--rounds", "0", "--empty", "", "--end"]);
   assert.equal(opt("--target", "."), "src");
-  assert.equal(opt("--rounds", "6"), "0", "explicit 0 is not dropped");
-  assert.equal(opt("--empty", "d"), "", "explicit empty value honored");
+  assert.equal(opt("--rounds", "6"), "0", "explicit 0 is not dropped ('0' is truthy)");
+  assert.equal(opt("--empty", "6"), "6", "explicit empty falls back — avoids parseInt('')→NaN disabling a cap");
   assert.equal(opt("--missing", "fallback"), "fallback");
   assert.equal(opt("--end", "fallback"), "fallback", "flag at end with no value falls back");
 });

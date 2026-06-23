@@ -92,9 +92,13 @@ function applyPreflight() {
   if (!trusted) return off(`--apply needs .multi-review.json committed on ${base} (trusted policy source)`);
   if (JSON.stringify(trusted) !== JSON.stringify(cfg))
     return off(`working-tree .multi-review.json differs from ${base} (a change must not weaken its own guardrails)`);
+  // Fail safe: an empty/absent perimeter would let --apply auto-edit security/money code.
+  // Refuse rather than run wide open (autodetectConfig always emits a broad perimeter).
+  const perimeter = Array.isArray(trusted.protectedPaths) ? trusted.protectedPaths : [];
+  if (!perimeter.length) return off(`${base} .multi-review.json has no protectedPaths perimeter (would auto-edit security/money code)`);
 
   ensureIgnored("reviews/"); // keep run artifacts out of fix commits
-  return trusted.protectedPaths ?? [];
+  return perimeter;
 }
 
 function listFiles(p) {

@@ -29,7 +29,7 @@ import {
   makeOpt, tokenizeCmd, stripAnsi,
 } from "./lib/core.mjs";
 // Shared shell/git helpers (single source of truth — see lib/sh.mjs).
-import { cliWorks, toolPresent, trackedFiles, gitSha, changedFiles, runCmd } from "./lib/sh.mjs";
+import { cliWorks, toolPresent, trackedFiles, gitSha, changedFiles, runCmd, currentBranch, gitLogSubjects } from "./lib/sh.mjs";
 
 // ---- args ------------------------------------------------------------------
 const argv = process.argv.slice(2);
@@ -96,7 +96,10 @@ function buildGateLadder(cfg) {
     ...(cfg.secretScan === false ? [] : [{ name: "secrets (builtin)", builtin: "secrets", required: true }]),
     ...(cfg.codeSlopScan === false ? [] : [{ name: "code-slop (builtin)", builtin: "codeslop", required: true }]),
   ];
-  const fromValidation = (cfg.validation?.default || []).map((cmd) => ({ name: cmd.length <= 24 ? cmd : cmd.split(" ")[0], cmd, required: true }));
+  const fromValidation = (cfg.validation?.default || []).map((cmd) => {
+    const label = Array.isArray(cmd) ? cmd.join(" ") : cmd; // array-form cmd is valid (see tokenizeCmd/runCmd)
+    return { name: label.length <= 24 ? label : tokenizeCmd(cmd)[0], cmd, required: true };
+  });
   return [...builtin, ...fromValidation, ...(cfg.gates || [])];
 }
 // Built-in gates run in-process (no external tool, always available). Currently: a
@@ -253,13 +256,13 @@ function reportMetrics() {
       }
     }
   }
-  const subjects = (spawnSync("git", ["log", "--pretty=%s", "-n", "500"], { shell: true, encoding: "utf8" }).stdout || "")
-    .split(/\r?\n/).filter(Boolean);
-  const report = aggregate(summaries, subjects.map(classifyCommit));
+  const report = aggregate(summaries, gitLogSubjects(500).map(classifyCommit));
 
-  // Self-evaluation gate, wired (not just advertised): compare this snapshot against the
-  // last recorded one and apply the keep-a-self-rewrite-only-if-it-improves rule. The
-  // snapshot lives under gitignored reviews/, so this is drift detection across runs.
+  // Metrics TREND vs the last recorded snapshot, using the same keep-only-if-it-improves
+  // rule (selfChangeAcceptable). NOTE: report.* are cumulative over all manifests in this
+  // checkout, so this is cross-run drift detection — a directional signal, NOT an isolated
+  // measurement of a single self-rewrite (that needs a before/after harness around one
+  // change; see docs/ROADMAP.md). Snapshot lives under gitignored reviews/.
   const snapPath = join("reviews", ".metrics-prev.json");
   const cur = { escapeRate: report.escapeRateProxy, slopRate: report.slopRate };
   let verdict = "";
@@ -267,7 +270,7 @@ function reportMetrics() {
     try {
       const prev = JSON.parse(readFileSync(snapPath, "utf8"));
       const ok = selfChangeAcceptable(prev, cur);
-      verdict = `- self-change gate vs last snapshot: **${ok ? "ACCEPT" : "REJECT"}** ` +
+      verdict = `- metrics trend vs last snapshot: **${ok ? "IMPROVING" : "not improving"}** ` +
         `(prev escape ${prev.escapeRate}/slop ${prev.slopRate} → now ${cur.escapeRate}/${cur.slopRate})\n`;
     } catch { /* corrupt snapshot — ignore, reseed below */ }
   }
@@ -338,7 +341,7 @@ function main() {
   log(`${C.b}# /goal${C.x}  ${C.c}${GOAL || "(no goal text — review/maintain mode)"}${C.x}`);
   log(`${C.dim}target:${C.x} ${TARGET}   ${C.dim}autonomy:${C.x} ${AUTONOMY}   ${C.dim}security:${C.x} ${cfg.securityMode}   ${C.dim}models:${C.x} ${models.join(",") || "none"}   ${C.dim}gates:${C.x} ${ladder.length}   ${C.dim}mode:${C.x} ${DRY ? "DRY-RUN" : APPLY ? "APPLY" : "report"}`);
   if (APPLY && !DRY) {
-    const branch = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { shell: true, encoding: "utf8" }).stdout.trim();
+    const branch = currentBranch();
     if (branch === "main" || branch === "master") { log(`${C.r}REFUSING --apply on the default branch.${C.x}`); flushLog(); process.exit(2); }
   }
 

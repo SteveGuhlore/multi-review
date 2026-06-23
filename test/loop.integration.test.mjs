@@ -92,6 +92,15 @@ test("loop --apply downgrades to report-only when the change edits its own polic
   } finally { cleanup(dir); }
 });
 
+test("loop --apply refuses an empty/absent protectedPaths perimeter (fail safe, not wide open)", () => {
+  const dir = repo(() => {}, { cfg: { extensions: [".js"], protectedPaths: [], validation: { default: ["node --version"] } } });
+  try {
+    const r = runLoop(dir, "--apply", "--rounds", "1", "--minutes", "1");
+    assert.match(r.stdout, /no protectedPaths perimeter/);
+    assert.match(r.stdout, /REPORT-ONLY/);
+  } finally { cleanup(dir); }
+});
+
 test("loop --apply preflight passes when clean, on a branch, policy matches the trusted base", () => {
   const dir = repo(); // feature branch, config identical to main, clean tree
   try {

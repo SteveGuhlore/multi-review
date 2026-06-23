@@ -68,6 +68,19 @@ test("goal --gates-only: a required gate whose tool is absent fails closed (not 
   assert.match(stdout, /not installed/);
 });
 
+test("goal --gates-only: array-form validation command builds + runs without mangling", () => {
+  const { stdout, manifest } = runGoalInFixture(
+    {
+      "package.json": JSON.stringify({ name: "fix", version: "1.0.0" }),
+      // Array form is the unambiguous cmd shape (tokenizeCmd/runCmd) — must not crash ladder build.
+      ".multi-review.json": JSON.stringify({ extensions: [".js"], protectedPaths: ["**/auth/**"], validation: { default: [["node", "--version"]] } }),
+    },
+    ["--gates-only"],
+  );
+  assert.match(stdout, /gates green/);
+  assert.ok(manifest.gates.find((g) => g.name === "node --version"), "array cmd gets a readable joined name");
+});
+
 function withFixture(setup, fn) {
   const dir = mkdtempSync(join(tmpdir(), "goal-it-"));
   try { setup(dir); return fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); }
