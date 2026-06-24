@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseRunDir, aggregate, renderHtml } from "../lib/dashboard.mjs";
+import { parseRunDir, aggregate, renderHtml, parseLog } from "../lib/dashboard.mjs";
 
 test("parseRunDir: a loop run uses its newest round-*.json and maps support[] -> models", () => {
   const run = parseRunDir("loop-2026-06-17T23-16-18-431Z", {
@@ -122,4 +122,83 @@ test("parseRunDir: findings are sorted by severity, critical first (quick-read)"
     ],
   });
   assert.deepEqual(run.findings.map((f) => f.severity), ["critical", "high", "medium", "low", "info"]);
+});
+
+test("renderHtml: severity chips are clickable filters and rows are tagged for filtering", () => {
+  const run = parseRunDir("loop-2026-06-17T23-00-00-000Z", {
+    "round-1.json": [
+      { severity: "critical", file: "auth.js", issue: "x", support: ["claude"] },
+      { severity: "low", file: "log.js", issue: "y", support: ["codex"] },
+    ],
+  });
+  const html = renderHtml(aggregate([run]));
+  assert.match(html, /class="chip"[^>]*data-sev="critical"/);
+  assert.match(html, /class="chip"[^>]*data-sev="low"/);
+  assert.match(html, /<tr data-sev="critical"/);
+  assert.match(html, /<tr data-sev="low"/);
+  assert.match(html, /function flt\(/);
+});
+
+test("parseLog: extracts mode, model counts, validated/fixable/plan, applied, converged, outcomes", () => {
+  const log = [
+    "# multi-review loop (debate)",
+    "Target: . · models: claude, codex, gemini · mode: APPLY · caps: 6 rounds",
+    "## Round 1 — 3 file(s)",
+    "  claude review: 4",
+    "  codex review: 2",
+    "  gemini review: 1",
+    "  debate pass 1: 7 findings tracked",
+    "  validated: 7 (fixable: 5, plan: 2)",
+    "  ✓ committed — files: a.js",
+    "  ✗ reverted → PLAN: b.js",
+    "  applied 1 fix(es).",
+    "✅ CONVERGED — no auto-fixable validated findings remain.",
+  ].join("\n");
+  const s = parseLog(log);
+  assert.equal(s.mode, "apply");
+  assert.deepEqual(s.models, { claude: 4, codex: 2, gemini: 1 });
+  assert.equal(s.validated, 7);
+  assert.equal(s.fixable, 5);
+  assert.equal(s.plan, 2);
+  assert.equal(s.applied, 1);
+  assert.equal(s.converged, true);
+  assert.deepEqual(s.committed, ["a.js"]);
+  assert.deepEqual(s.reverted, ["b.js"]);
+});
+
+test("parseLog: report-only run, no apply lines", () => {
+  const s = parseLog("Target: . · models: claude · mode: report\n  claude review: 3\n  validated: 3 (fixable: 2, plan: 1)\n(report-only) 2 fixable + 1 plan items");
+  assert.equal(s.mode, "report");
+  assert.equal(s.applied, undefined);
+  assert.equal(s.converged, false);
+  assert.deepEqual(s.committed, []);
+});
+
+test("parseRunDir: derives finding outcomes from the log (committed=fixed, reverted/critical=plan)", () => {
+  const run = parseRunDir("loop-2026-06-17T23-00-00-000Z", {
+    "round-1.json": [
+      { severity: "critical", file: "auth.js", issue: "authz", support: ["claude"] },
+      { severity: "high", file: "db.js", issue: "sql", support: ["claude", "codex"] },
+      { severity: "medium", file: "x.js", issue: "y", support: ["codex"] },
+    ],
+    "log.md": "mode: APPLY\n  ✓ committed — files: db.js\n  ✗ reverted → PLAN: auth.js",
+  });
+  const o = Object.fromEntries(run.findings.map((f) => [f.file, f.outcome]));
+  assert.equal(o["db.js"], "fixed");
+  assert.equal(o["auth.js"], "plan");
+  assert.equal(o["x.js"], "reported");
+});
+
+test("renderHtml: operations console — what happened, what worked, outcomes, copyable next actions", () => {
+  const run = parseRunDir("loop-2026-06-17T23-00-00-000Z", {
+    "round-1.json": [{ severity: "high", file: "db.js", issue: "sql concat", support: ["claude", "codex"] }],
+    "log.md": "mode: APPLY\n  claude review: 2\n  codex review: 1\n  validated: 2 (fixable: 1, plan: 0)\n  ✓ committed — files: db.js\n  applied 1 fix(es).\n✅ CONVERGED",
+  });
+  const html = renderHtml(aggregate([run]));
+  assert.match(html, /what happened/i);
+  assert.match(html, /what worked/i);
+  assert.match(html, /next actions/i);
+  assert.match(html, /loop\.mjs --target \./);
+  assert.match(html, /onclick="cp\(/);
+  assert.match(html, /fixed/);
 });

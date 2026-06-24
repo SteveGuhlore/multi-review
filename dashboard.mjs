@@ -6,7 +6,7 @@
 // Used two ways:
 //   - auto: loop.mjs / goal.mjs call writeDashboard("reviews") at the end of a run (guarded).
 //   - manual: `node dashboard.mjs [reviewsDir]` regenerates it on demand.
-import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readdirSync, statSync, readFileSync, writeFileSync, existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseRunDir, aggregate, renderHtml } from "./lib/dashboard.mjs";
@@ -45,6 +45,11 @@ export function writeDashboard(reviewsDir = "reviews") {
 }
 
 // Run directly: `node dashboard.mjs [reviewsDir]`. The guard keeps imports side-effect-free.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Entry-point check via realpath, so it also fires when invoked through a junction/symlink
+// (e.g. ~/.claude/multi-review -> the repo): argv[1] is the junction path while
+// import.meta.url is the resolved real path, so compare their resolved forms.
+let _isEntry = false;
+try { _isEntry = !!process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href; } catch { /* not the entry point */ }
+if (_isEntry) {
   console.log(`dashboard -> ${writeDashboard(process.argv[2] || "reviews")}`);
 }

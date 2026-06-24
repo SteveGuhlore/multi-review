@@ -66,3 +66,38 @@ e2e("e2e: dashboard renders in a browser with a clean debug console", { timeout:
     await browser.close();
   }
 });
+
+e2e("e2e: clicking a severity chip filters the findings table (clean console)", { timeout: 120000 }, async (t) => {
+  const reviews = mkdtempSync(join(tmpdir(), "mr-e2e-flt-"));
+  const d = join(reviews, "loop-2026-06-17T23-30-00-000Z");
+  mkdirSync(d, { recursive: true });
+  writeFileSync(join(d, "round-1.json"), JSON.stringify([
+    { severity: "critical", file: "auth.js", issue: "missing authz", support: ["claude"] },
+    { severity: "low", file: "log.js", issue: "noisy logging", support: ["codex"] },
+  ]));
+  const out = writeDashboard(reviews);
+  let browser;
+  try { browser = await chromium.launch({ timeout: 60000 }); }
+  catch (e) { t.skip(`browser not launchable (run: npx playwright install chromium) -- ${e.message}`); return; }
+  try {
+    const page = await browser.newPage();
+    const consoleErrors = [];
+    page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text()); });
+    page.on("pageerror", (e) => consoleErrors.push(String(e)));
+    await page.goto(pathToFileURL(out).href);
+
+    assert.ok(await page.getByText("auth.js").first().isVisible(), "critical row visible initially");
+    assert.ok(await page.getByText("log.js").first().isVisible(), "low row visible initially");
+
+    await page.locator('.chip[data-sev="low"]').click();
+    assert.ok(!(await page.getByText("auth.js").first().isVisible()), "critical row hidden after 'low' filter");
+    assert.ok(await page.getByText("log.js").first().isVisible(), "low row still visible after 'low' filter");
+
+    await page.locator('.chip[data-sev="all"]').click();
+    assert.ok(await page.getByText("auth.js").first().isVisible(), "critical row back after 'ALL'");
+
+    assert.deepEqual(consoleErrors, [], "no console errors during filtering");
+  } finally {
+    await browser.close();
+  }
+});

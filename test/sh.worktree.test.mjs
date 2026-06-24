@@ -68,6 +68,26 @@ test("applyInWorktree: failed validation leaves the user's tree completely untou
   } finally { cleanup(dir); }
 });
 
+test("applyInWorktree: guard veto blocks the commit (protected path never reaches the branch)", () => {
+  const dir = repo();
+  try {
+    const before = head(dir);
+    const res = applyInWorktree({
+      cwd: dir,
+      edit: (wt) => writeFileSync(join(wt, "secret.txt"), "x\n"),
+      validate: () => true,
+      guard: (touched) => !touched.includes("secret.txt"), // simulate a protected-path veto
+    });
+    assert.equal(res.ok, false);
+    assert.equal(res.blocked, true);
+    assert.equal(res.committed, false);
+    assert.deepEqual(res.touched, ["secret.txt"]);
+    assert.equal(head(dir), before, "HEAD unchanged when guard vetoes");
+    assert.ok(!existsSync(join(dir, "secret.txt")), "vetoed change never reaches the user's tree");
+    assert.equal(worktreeCount(dir), 1);
+  } finally { cleanup(dir); }
+});
+
 test("applyInWorktree: a validated but no-op edit commits nothing", () => {
   const dir = repo();
   try {
