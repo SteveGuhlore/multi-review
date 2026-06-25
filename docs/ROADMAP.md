@@ -36,7 +36,8 @@ multi-model review debate.
 | Built-in secret + code-slop gates (zero-dep) + license-policy gate | ✅ built | `lib/core.mjs`, `scripts/deny-copyleft.mjs` |
 | Hash-chained, tamper-evident run-manifests + `--verify` | ✅ built | `lib/core.mjs` (`verifyChain`), `goal.mjs` |
 | Self-eval metrics (bug-escape + slop rate; keep-a-rewrite rule) | ✅ measurement half | `lib/metrics.mjs`, `goal.mjs --metrics` |
-| Mutation-guided test-synthesis acceptance gate (deterministic half) | ✅ built | `lib/synth.mjs` |
+| Mutation-guided test-synthesis acceptance gate (deterministic half) | ✅ built + wired as `/goal`'s optional `synth` gate | `lib/synth.mjs`, `goal.mjs` |
+| Worktree-isolated `--apply` (failed fix never touches your tree) | ✅ built | `lib/sh.applyInWorktree`, `loop.mjs` |
 | Human-readable per-run `SUMMARY.md` | ✅ built | `goal.mjs` |
 | `loop.mjs` deduped onto the shared core | ✅ done | `loop.mjs` |
 | Self-validating CI (npm test + `goal --gates-only`) | ✅ built | `.github/workflows/ci.yml` |

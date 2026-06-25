@@ -83,6 +83,9 @@ re-review. Stops when the models converge (no validated fixable findings + green
 ## Safety
 - **Critical + protected/security paths are never auto-edited** — they go to `reviews/loop-*/PLAN.md`.
 - Auto-fix runs **only on a branch** (refuses on `main`/`master`), each fix a **revertible commit**.
+- Each fix is applied in an **isolated git worktree** and cherry-picked onto your branch only if validation stays green — a failed fix **never touches your working tree** (no `git reset --hard` on your files).
+- `--apply` requires a **clean working tree** (so each validated fix cherry-picks cleanly) and a **non-empty `protectedPaths` perimeter** (it refuses to run wide open).
+- `--apply` loads the protected-path perimeter from the **trusted base branch**, and drops to **report-only** if the change edits `.multi-review.json` — a change can't weaken its own guardrails.
 - `--apply` needs a real `validation.default` or it drops to **report-only** (so a wrong gate can't silently revert everything).
 - "Converged" = the models agree nothing material remains **and** validation passes — not a proof of bug-freeness.
 
